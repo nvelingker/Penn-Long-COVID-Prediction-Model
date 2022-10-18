@@ -1483,3 +1483,37 @@ def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine
 ## Global imports and functions included below ##
 #################################################
 
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.6ba08a81-0371-4a67-b4d6-9887ba853916"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    all_patients_summary_fact_table_de_id=Input(rid="ri.vector.main.execute.0c6d6743-c3de-4142-97f2-870136062e0a"),
+    all_patients_summary_fact_table_de_id_testing=Input(rid="ri.vector.main.execute.a7e85f36-1537-43bf-a5aa-3b454a01b2d9")
+)
+def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary_fact_table_de_id_testing, Long_COVID_Silver_Standard):
+    
+    static_cols = ['person_id','total_visits', 'age']
+
+    cols = static_cols + [col for col in all_patients_summary_fact_table_de_id.columns if 'indicator' in col]
+    
+    ## get outcome column
+    Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
+    Outcome = all_patients_summary_fact_table_de_id[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
+    Outcome = Long_COVID_Silver_Standard[["person_id", "outcome"]]
+
+    
+    Outcome = list(Outcome[["person_id", "outcome"]].set_index("person_id")["outcome"])
+    Training = all_patients_summary_fact_table_de_id[cols].set_index("person_id").fillna(0.0).to_numpy()
+    Testing = all_patients_summary_fact_table_de_id_testing[cols].set_index("person_id").fillna(0.0).to_numpy()
+    
+    
+    clf = LogisticRegression(penalty='l2', solver='liblinear', random_state=0, max_iter=500).fit(Training, Outcome)
+
+    preds = clf.predict_proba(Testing)[:,1]
+    
+    predictions = pd.DataFrame.from_dict({
+        'person_id': list(all_patients_summary_fact_table_de_id_testing["person_id"]),
+        'outcome_likelihood': preds.tolist()
+    }, orient='columns')
+
+    return predictions
+

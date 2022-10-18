@@ -258,3 +258,10 @@ pivot (
     for number in (1,2,3,4) 
 )
 
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.16c82ac5-1424-43f9-a48c-f3b3d19b8816"),
+    train_test_model=Input(rid="ri.vector.main.execute.6ba08a81-0371-4a67-b4d6-9887ba853916")
+)
+SELECT *
+FROM train_test_model
+
