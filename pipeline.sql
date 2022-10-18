@@ -1,6 +1,22 @@
 
 
 @transform_pandas(
+    Output(rid="ri.vector.main.execute.0c8d244b-83b0-4a73-9488-3db78097ac5a"),
+    deduplicated=Input(rid="ri.vector.main.execute.ec478f23-d29c-4d13-924b-e3b462b7a054")
+)
+SELECT person_id, data_partner_id, count(vax_date) as vaccine_txn
+FROM deduplicated
+group by person_id, data_partner_id
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.47a29e5a-88f1-4a48-8615-bb98ab911fca"),
+    deduplicated_testing=Input(rid="ri.vector.main.execute.708dc926-ae90-4f99-bb13-f3957d642c78")
+)
+SELECT person_id, data_partner_id, count(vax_date) as vaccine_txn
+FROM deduplicated_testing
+group by person_id, data_partner_id
+
+@transform_pandas(
     Output(rid="ri.vector.main.execute.20bfed79-2fea-446f-a920-88f0dbc22bc2"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
     drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
@@ -157,4 +173,20 @@ SELECT DISTINCT person_id,
     procedure_date as vax_date,
     vax_type
 FROM baseline_vaccines_from_proc_testing
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.c2687a32-aea0-4394-ae9d-b488d148563e"),
+    deduplicated=Input(rid="ri.vector.main.execute.ec478f23-d29c-4d13-924b-e3b462b7a054")
+)
+
+select * from (
+    select person_id, data_partner_id, 
+    row_number() over (partition by person_id order by person_id, vax_date) as number, vax_type, vax_date 
+    from deduplicated 
+) A 
+
+pivot (
+    max(vax_date) as vax_date, max(vax_type) as vax_type 
+    for number in (1,2,3,4) 
+)
 
