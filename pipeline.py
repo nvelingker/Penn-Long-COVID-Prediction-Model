@@ -5,6 +5,104 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 
 @transform_pandas(
+    Output(rid="ri.vector.main.execute.0c6d6743-c3de-4142-97f2-870136062e0a"),
+    all_patients_visit_day_facts_table_de_id=Input(rid="ri.vector.main.execute.998f073b-6c2a-447c-8593-5de8998dc047"),
+    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e")
+)
+#Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
+#Creator/Owner/contact - Andrea Zhou
+#Last Update - 7/8/22
+#Description - The final step is to aggregate information to create a data frame that contains a single row of data for each patient in the cohort.  This node aggregates all information from the cohort_all_facts_table and summarizes each patient's facts in a single row.
+
+def all_patients_summary_fact_table_de_id(all_patients_visit_day_facts_table_de_id, everyone_cohort_de_id):
+
+    #deaths_df = everyone_patient_deaths.select('person_id','patient_death')
+    df = all_patients_visit_day_facts_table_de_id.drop('patient_death_at_visit', 'during_macrovisit_hospitalization')
+  
+    df = df.groupby('person_id').agg(
+        F.max('BMI_rounded').alias('BMI_max_observed_or_calculated'),
+        *[F.max(col).alias(col + '_indicator') for col in df.columns if col not in ('person_id', 'BMI_rounded', 'visit_date', 'had_vaccine_administered')],
+        F.sum('had_vaccine_administered').alias('total_number_of_COVID_vaccine_doses'))
+
+    #columns to indicate whether a patient belongs in confirmed or possible subcohorts
+    df = df.withColumn('confirmed_covid_patient', 
+        F.when((F.col('LL_COVID_diagnosis_indicator') == 1) | (F.col('PCR_AG_Pos_indicator') == 1), 1).otherwise(0))
+
+    df = df.withColumn('possible_covid_patient', 
+        F.when(F.col('confirmed_covid_patient') == 1, 0)
+        .when(F.col('Antibody_Pos_indicator') == 1, 1)
+        .when(F.col('LL_Long_COVID_diagnosis_indicator') == 1, 1)
+        .when(F.col('LL_Long_COVID_clinic_visit_indicator') == 1, 1)
+        .when(F.col('LL_PNEUMONIADUETOCOVID_indicator') == 1, 1)
+        .when(F.col('LL_MISC_indicator') == 1, 1)
+        .otherwise(0))     
+    
+    #join above tables on patient ID  
+    #df = df.join(deaths_df, 'person_id', 'left').withColumnRenamed('patient_death', 'patient_death_indicator')
+    df = everyone_cohort_de_id.join(df, 'person_id','left')
+
+    #final fill of null in non-continuous variables with 0
+    df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_max_observed_or_calculated', 'postal_code', 'age')])
+    
+    df = df.distinct()
+
+    return df
+        
+#################################################
+## Global imports and functions included below ##
+#################################################
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.a7e85f36-1537-43bf-a5aa-3b454a01b2d9"),
+    all_patients_visit_day_facts_table_de_id_testing=Input(rid="ri.vector.main.execute.16276f02-e36f-4f1e-b74e-bf2f03fec74c"),
+    everyone_cohort_de_id_testing=Input(rid="ri.vector.main.execute.0ca5c190-d2ae-492a-b291-66fd8092b269")
+)
+#Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
+#Creator/Owner/contact - Andrea Zhou
+#Last Update - 7/8/22
+#Description - The final step is to aggregate information to create a data frame that contains a single row of data for each patient in the cohort.  This node aggregates all information from the cohort_all_facts_table and summarizes each patient's facts in a single row.
+
+def all_patients_summary_fact_table_de_id_testing(all_patients_visit_day_facts_table_de_id_testing, everyone_cohort_de_id_testing):
+    everyone_cohort_de_id = everyone_cohort_de_id_testing
+    all_patients_visit_day_facts_table_de_id = all_patients_visit_day_facts_table_de_id_testing
+
+    #deaths_df = everyone_patient_deaths.select('person_id','patient_death')
+    df = all_patients_visit_day_facts_table_de_id.drop('patient_death_at_visit', 'during_macrovisit_hospitalization')
+  
+    df = df.groupby('person_id').agg(
+        F.max('BMI_rounded').alias('BMI_max_observed_or_calculated'),
+        *[F.max(col).alias(col + '_indicator') for col in df.columns if col not in ('person_id', 'BMI_rounded', 'visit_date', 'had_vaccine_administered')],
+        F.sum('had_vaccine_administered').alias('total_number_of_COVID_vaccine_doses'))
+
+    #columns to indicate whether a patient belongs in confirmed or possible subcohorts
+    df = df.withColumn('confirmed_covid_patient', 
+        F.when((F.col('LL_COVID_diagnosis_indicator') == 1) | (F.col('PCR_AG_Pos_indicator') == 1), 1).otherwise(0))
+
+    df = df.withColumn('possible_covid_patient', 
+        F.when(F.col('confirmed_covid_patient') == 1, 0)
+        .when(F.col('Antibody_Pos_indicator') == 1, 1)
+        .when(F.col('LL_Long_COVID_diagnosis_indicator') == 1, 1)
+        .when(F.col('LL_Long_COVID_clinic_visit_indicator') == 1, 1)
+        .when(F.col('LL_PNEUMONIADUETOCOVID_indicator') == 1, 1)
+        .when(F.col('LL_MISC_indicator') == 1, 1)
+        .otherwise(0))     
+    
+    #join above tables on patient ID  
+    #df = df.join(deaths_df, 'person_id', 'left').withColumnRenamed('patient_death', 'patient_death_indicator')
+    df = everyone_cohort_de_id.join(df, 'person_id','left')
+
+    #final fill of null in non-continuous variables with 0
+    df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_max_observed_or_calculated', 'postal_code', 'age')])
+
+    df = df.distinct()
+    
+    return df
+        
+#################################################
+## Global imports and functions included below ##
+#################################################
+
+@transform_pandas(
     Output(rid="ri.vector.main.execute.998f073b-6c2a-447c-8593-5de8998dc047"),
     everyone_conditions_of_interest=Input(rid="ri.vector.main.execute.fda1eca7-ed23-46f1-96f1-3c771194bd5b"),
     everyone_devices_of_interest=Input(rid="ri.vector.main.execute.ae98106d-77ad-4cd5-9ee4-066d00ab0098"),
@@ -23,6 +121,78 @@ from sklearn.linear_model import LogisticRegression
 def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, everyone_measurements_of_interest, everyone_procedures_of_interest, everyone_observations_of_interest, everyone_drugs_of_interest, everyone_devices_of_interest, microvisits_to_macrovisits, everyone_vaccines_of_interest):
 
     macrovisits_df = microvisits_to_macrovisits
+    vaccines_df = everyone_vaccines_of_interest
+    procedures_df = everyone_procedures_of_interest
+    devices_df = everyone_devices_of_interest
+    observations_df = everyone_observations_of_interest
+    conditions_df = everyone_conditions_of_interest
+    drugs_df = everyone_drugs_of_interest
+    measurements_df = everyone_measurements_of_interest
+
+    df = macrovisits_df.select('person_id','visit_start_date').withColumnRenamed('visit_start_date','visit_date')
+    df = df.join(vaccines_df, on=list(set(df.columns)&set(vaccines_df.columns)), how='outer')
+    df = df.join(procedures_df, on=list(set(df.columns)&set(procedures_df.columns)), how='outer')
+    df = df.join(devices_df, on=list(set(df.columns)&set(devices_df.columns)), how='outer')
+    df = df.join(observations_df, on=list(set(df.columns)&set(observations_df.columns)), how='outer')
+    df = df.join(conditions_df, on=list(set(df.columns)&set(conditions_df.columns)), how='outer')
+    df = df.join(drugs_df, on=list(set(df.columns)&set(drugs_df.columns)), how='outer')
+    df = df.join(measurements_df, on=list(set(df.columns)&set(measurements_df.columns)), how='outer')    
+    
+    df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
+   
+    #add F.max of all indicator columns to collapse all cross-domain flags to unique person and visit rows
+    #each visit_date represents the date of the event or fact being noted in the patient's medical record
+    df = df.groupby('person_id', 'visit_date').agg(*[F.max(col).alias(col) for col in df.columns if col not in ('person_id','visit_date')])
+   
+    #create and join in flag that indicates whether the visit day was during a macrovisit (1) or not (0)
+    #any conditions, observations, procedures, devices, drugs, measurements, and/or death flagged 
+    #with a (1) on that particular visit date would then be considered to have happened during a macrovisit
+    macrovisits_df = macrovisits_df \
+        .select('person_id', 'macrovisit_start_date', 'macrovisit_end_date') \
+        .where(F.col('macrovisit_start_date').isNotNull() & F.col('macrovisit_end_date').isNotNull()) \
+        .distinct()
+    df_hosp = df.select('person_id', 'visit_date').join(macrovisits_df, on=['person_id'], how= 'outer')
+    df_hosp = df_hosp.withColumn('during_macrovisit_hospitalization', F.when((F.datediff("macrovisit_end_date","visit_date")>=0) & (F.datediff("macrovisit_start_date","visit_date")<=0), 1).otherwise(0)) \
+        .drop('macrovisit_start_date', 'macrovisit_end_date') \
+        .where(F.col('during_macrovisit_hospitalization') == 1) \
+        .distinct()
+    df = df.join(df_hosp, on=['person_id','visit_date'], how="left")   
+
+    #final fill of null in non-continuous variables with 0
+    df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
+
+    return df
+    
+#################################################
+## Global imports and functions included below ##
+#################################################
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.16276f02-e36f-4f1e-b74e-bf2f03fec74c"),
+    everyone_conditions_of_interest_testing=Input(rid="ri.vector.main.execute.53ac67c6-4b83-4354-9591-d4ed40cac3ae"),
+    everyone_devices_of_interest_testing=Input(rid="ri.vector.main.execute.905df3fe-1777-4ec7-93ae-e5ac46e50762"),
+    everyone_drugs_of_interest_testing=Input(rid="ri.vector.main.execute.49a46a48-21e3-4f9d-ae9e-67c7f3120fef"),
+    everyone_measurements_of_interest_testing=Input(rid="ri.vector.main.execute.b6e9730e-6d5d-4ee7-80e9-34db9d4f89cf"),
+    everyone_observations_of_interest_testing=Input(rid="ri.vector.main.execute.944ed1b3-eaf6-4134-b52b-3507c0267a90"),
+    everyone_procedures_of_interest_testing=Input(rid="ri.vector.main.execute.ff49312e-197f-4017-a29c-930f887d57ff"),
+    everyone_vaccines_of_interest_testing=Input(rid="ri.vector.main.execute.2cb9a3dc-e056-4ba7-9470-9cdf9ede4c94"),
+    microvisits_to_macrovisits_testing=Input(rid="ri.foundry.main.dataset.f5008fa4-e736-4244-88e1-1da7a68efcdb")
+)
+#Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
+#Creator/Owner/contact - Andrea Zhou
+#Last Update - 7/8/22
+#Description - All facts collected in the previous steps are combined in this cohort_all_facts_table on the basis of unique visit days for each patient. Indicators are created for the presence or absence of events, medications, conditions, measurements, device exposures, observations, procedures, and outcomes.  It also creates an indicator for whether the visit date where a fact was noted occurred during any hospitalization. This table is useful if the analyst needs to use actual dates of events as it provides more detail than the final patient-level table.  Use the max and min functions to find the first and last occurrences of any events.
+
+def all_patients_visit_day_facts_table_de_id_testing(everyone_conditions_of_interest_testing, everyone_measurements_of_interest_testing, everyone_procedures_of_interest_testing, everyone_observations_of_interest_testing, everyone_drugs_of_interest_testing, everyone_devices_of_interest_testing, everyone_vaccines_of_interest_testing, microvisits_to_macrovisits_testing):
+    everyone_drugs_of_interest = everyone_drugs_of_interest_testing
+    everyone_procedures_of_interest = everyone_procedures_of_interest_testing
+    everyone_observations_of_interest = everyone_observations_of_interest_testing
+    everyone_measurements_of_interest = everyone_measurements_of_interest_testing
+    everyone_conditions_of_interest = everyone_conditions_of_interest_testing
+    everyone_vaccines_of_interest = everyone_vaccines_of_interest_testing
+    everyone_devices_of_interest = everyone_devices_of_interest_testing
+
+    macrovisits_df = microvisits_to_macrovisits_testing
     vaccines_df = everyone_vaccines_of_interest
     procedures_df = everyone_procedures_of_interest
     devices_df = everyone_devices_of_interest
