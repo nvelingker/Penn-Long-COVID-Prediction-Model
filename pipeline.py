@@ -389,6 +389,55 @@ def everyone_conditions_of_interest_testing(everyone_cohort_de_id_testing, conce
 #################################################
 
 @transform_pandas(
+    Output(rid="ri.vector.main.execute.ae98106d-77ad-4cd5-9ee4-066d00ab0098"),
+    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    customized_concept_set_input=Input(rid="ri.vector.main.execute.fab1d6ae-e7fb-434e-bf54-ddc10591ac6d"),
+    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
+    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e")
+)
+#Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
+#Creator/Owner/contact - Andrea Zhou
+#Last Update - 5/6/22
+#Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
+
+def everyone_devices_of_interest(device_exposure, everyone_cohort_de_id, concept_set_members, customized_concept_set_input):
+
+    #bring in only cohort patient ids
+    persons = everyone_cohort_de_id.select('person_id')
+    #filter device exposure table to only cohort patients
+    devices_df = device_exposure \
+        .select('person_id','device_exposure_start_date','device_concept_id') \
+        .where(F.col('device_exposure_start_date').isNotNull()) \
+        .withColumnRenamed('device_exposure_start_date','visit_date') \
+        .withColumnRenamed('device_concept_id','concept_id') \
+        .join(persons,'person_id','inner')
+
+    #filter fusion sheet for concept sets and their future variable names that have concepts in the devices domain
+    fusion_df = customized_concept_set_input \
+        .filter(customized_concept_set_input.domain.contains('device')) \
+        .select('concept_set_name','indicator_prefix')
+    #filter concept set members table to only concept ids for the devices of interest
+    concepts_df = concept_set_members \
+        .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
+        .where(F.col('is_most_recent_version')=='true') \
+        .join(fusion_df, 'concept_set_name', 'inner') \
+        .select('concept_id','indicator_prefix')
+        
+    #find device exposure information based on matching concept ids for devices of interest
+    df = devices_df.join(concepts_df, 'concept_id', 'inner')
+    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for devices of interest
+    df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
+
+    return df
+    
+
+#################################################
+## Global imports and functions included below ##
+#################################################
+
+    
+
+@transform_pandas(
     Output(rid="ri.vector.main.execute.905df3fe-1777-4ec7-93ae-e5ac46e50762"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
     customized_concept_set_input_testing=Input(rid="ri.vector.main.execute.4156447b-8bad-4af5-9150-010e304fa65a"),
@@ -483,6 +532,111 @@ def everyone_drugs_of_interest_testing(concept_set_members, drug_exposure_testin
 
     return df
     
+
+#################################################
+## Global imports and functions included below ##
+#################################################
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.606758b7-753d-4fe7-a9ff-190c18388d2d"),
+    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e"),
+    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7")
+)
+#Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
+#Creator/Owner/contact - Andrea Zhou
+#Last Update - 5/6/22
+#Description - This node filters the measurements table for rows that have a measurement_concept_id associated with one of the concept sets described in the data dictionary in the README.  Indicator names for a positive COVID PCR or AG test, negative COVID PCR or AG test, positive COVID antibody test, and negative COVID antibody test are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date. It also finds the harmonized value as a number for BMI measurements and collapses these values to unique instances on the basis of patient and visit date.  Measurement BMI cutoffs included are intended for adults. Analyses focused on pediatric measurements should use different bounds for BMI measurements. 
+
+def everyone_measurements_of_interest(measurement, concept_set_members, everyone_cohort_de_id):
+    
+    #bring in only cohort patient ids
+    persons = everyone_cohort_de_id.select('person_id')
+    #filter procedure occurrence table to only cohort patients    
+    df = measurement \
+        .select('person_id','measurement_date','measurement_concept_id','harmonized_value_as_number','value_as_concept_id') \
+        .where(F.col('measurement_date').isNotNull()) \
+        .withColumnRenamed('measurement_date','visit_date') \
+        .join(persons,'person_id','inner')
+        
+    concepts_df = concept_set_members \
+        .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
+        .where(F.col('is_most_recent_version')=='true')
+          
+    #Find BMI closest to COVID using both reported/observed BMI and calculated BMI using height and weight.  Cutoffs for reasonable height, weight, and BMI are provided and can be changed by the template user.
+    lowest_acceptable_BMI = 10
+    highest_acceptable_BMI = 100
+    lowest_acceptable_weight = 5 #in kgs
+    highest_acceptable_weight = 300 #in kgs
+    lowest_acceptable_height = .6 #in meters
+    highest_acceptable_height = 2.43 #in meters
+
+    bmi_codeset_ids = list(concepts_df.where(
+        (concepts_df.concept_set_name=="body mass index") 
+        & (concepts_df.is_most_recent_version=='true')
+        ).select('concept_id').toPandas()['concept_id'])
+    weight_codeset_ids = list(concepts_df.where(
+        (concepts_df.concept_set_name=="Body weight (LG34372-9 and SNOMED)") 
+        & (concepts_df.is_most_recent_version=='true')
+        ).select('concept_id').toPandas()['concept_id'])
+    height_codeset_ids = list(concepts_df.where(
+        (concepts_df.concept_set_name=="Height (LG34373-7 + SNOMED)") 
+        & (concepts_df.is_most_recent_version=='true')
+        ).select('concept_id').toPandas()['concept_id'])
+    
+    pcr_ag_test_ids = list(concepts_df.where(
+        (concepts_df.concept_set_name=="ATLAS SARS-CoV-2 rt-PCR and AG") 
+        & (concepts_df.is_most_recent_version=='true')
+        ).select('concept_id').toPandas()['concept_id'])
+    antibody_test_ids = list(concepts_df.where(
+        (concepts_df.concept_set_name=="Atlas #818 [N3C] CovidAntibody retry") 
+        & (concepts_df.is_most_recent_version=='true')
+        ).select('concept_id').toPandas()['concept_id'])
+    covid_positive_measurement_ids = list(concepts_df.where(
+        (concepts_df.concept_set_name=="ResultPos") 
+        & (concepts_df.is_most_recent_version=='true')
+        ).select('concept_id').toPandas()['concept_id'])
+    covid_negative_measurement_ids = list(concepts_df.where(
+        (concepts_df.concept_set_name=="ResultNeg") 
+        & (concepts_df.is_most_recent_version=='true')
+        ).select('concept_id').toPandas()['concept_id'])
+ 
+    #add value columns for rows associated with the above concept sets, but only include BMI or height or weight when in reasonable range
+    BMI_df = df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('Recorded_BMI', F.when(df.measurement_concept_id.isin(bmi_codeset_ids) & df.harmonized_value_as_number.between(lowest_acceptable_BMI, highest_acceptable_BMI), df.harmonized_value_as_number).otherwise(0)) \
+        .withColumn('height', F.when(df.measurement_concept_id.isin(height_codeset_ids) & df.harmonized_value_as_number.between(lowest_acceptable_height, highest_acceptable_height), df.harmonized_value_as_number).otherwise(0)) \
+        .withColumn('weight', F.when(df.measurement_concept_id.isin(weight_codeset_ids) & df.harmonized_value_as_number.between(lowest_acceptable_weight, highest_acceptable_weight), df.harmonized_value_as_number).otherwise(0)) 
+        
+    labs_df = df.withColumn('PCR_AG_Pos', F.when(df.measurement_concept_id.isin(pcr_ag_test_ids) & df.value_as_concept_id.isin(covid_positive_measurement_ids), 1).otherwise(0)) \
+        .withColumn('PCR_AG_Neg', F.when(df.measurement_concept_id.isin(pcr_ag_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0)) \
+        .withColumn('Antibody_Pos', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_positive_measurement_ids), 1).otherwise(0)) \
+        .withColumn('Antibody_Neg', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0))
+     
+    #collapse all reasonable values to unique person and visit rows
+    BMI_df = BMI_df.groupby('person_id', 'visit_date').agg(
+    F.max('Recorded_BMI').alias('Recorded_BMI'),
+    F.max('height').alias('height'),
+    F.max('weight').alias('weight'))
+    labs_df = labs_df.groupby('person_id', 'visit_date').agg(
+    F.max('PCR_AG_Pos').alias('PCR_AG_Pos'),
+    F.max('PCR_AG_Neg').alias('PCR_AG_Neg'),
+    F.max('Antibody_Pos').alias('Antibody_Pos'),
+    F.max('Antibody_Neg').alias('Antibody_Neg'))
+
+    #add a calculated BMI for each visit date when height and weight available.  Note that if only one is available, it will result in zero
+    #subsequent filter out rows that would have resulted from unreasonable calculated_BMI being used as best_BMI for the visit 
+    BMI_df = BMI_df.withColumn('calculated_BMI', (BMI_df.weight/(BMI_df.height*BMI_df.height)))
+    BMI_df = BMI_df.withColumn('BMI', F.when(BMI_df.Recorded_BMI>0, BMI_df.Recorded_BMI).otherwise(BMI_df.calculated_BMI)) \
+        .select('person_id','visit_date','BMI')
+    BMI_df = BMI_df.filter((BMI_df.BMI<=highest_acceptable_BMI) & (BMI_df.BMI>=lowest_acceptable_BMI)) \
+        .withColumn('BMI_rounded', F.round(BMI_df.BMI)) \
+        .drop('BMI')
+    BMI_df = BMI_df.withColumn('OBESITY', F.when(BMI_df.BMI_rounded>=30, 1).otherwise(0))
+
+    #join BMI_df with labs_df to retain all lab results with only reasonable BMI_rounded and OBESITY flags
+    df = labs_df.join(BMI_df, on=['person_id', 'visit_date'], how='left') 
+
+    return df
 
 #################################################
 ## Global imports and functions included below ##
@@ -637,4 +791,100 @@ def everyone_observations_of_interest_testing(observation_testing, concept_set_m
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
 
     return df
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.873aa4ba-3bc4-4864-bbab-5d11ddd4884b"),
+    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    customized_concept_set_input=Input(rid="ri.vector.main.execute.fab1d6ae-e7fb-434e-bf54-ddc10591ac6d"),
+    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e"),
+    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
+)
+#Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
+#Creator/Owner/contact - Andrea Zhou
+#Last Update - 5/6/22
+#Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
+
+def everyone_procedures_of_interest(everyone_cohort_de_id, concept_set_members, procedure_occurrence, customized_concept_set_input):
+  
+    #bring in only cohort patient ids
+    persons = everyone_cohort_de_id.select('person_id')
+    #filter procedure occurrence table to only cohort patients    
+    procedures_df = procedure_occurrence \
+        .select('person_id','procedure_date','procedure_concept_id') \
+        .where(F.col('procedure_date').isNotNull()) \
+        .withColumnRenamed('procedure_date','visit_date') \
+        .withColumnRenamed('procedure_concept_id','concept_id') \
+        .join(persons,'person_id','inner')
+
+    #filter fusion sheet for concept sets and their future variable names that have concepts in the procedure domain
+    fusion_df = customized_concept_set_input \
+        .filter(customized_concept_set_input.domain.contains('procedure')) \
+        .select('concept_set_name','indicator_prefix')
+    #filter concept set members table to only concept ids for the procedures of interest
+    concepts_df = concept_set_members \
+        .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
+        .where(F.col('is_most_recent_version')=='true') \
+        .join(fusion_df, 'concept_set_name', 'inner') \
+        .select('concept_id','indicator_prefix')
+ 
+    #find procedure occurrence information based on matching concept ids for procedures of interest
+    df = procedures_df.join(concepts_df, 'concept_id', 'inner')
+    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for procedures of interest    
+    df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
+
+    return df
+    
+
+#################################################
+## Global imports and functions included below ##
+#################################################
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.ff49312e-197f-4017-a29c-930f887d57ff"),
+    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    customized_concept_set_input_testing=Input(rid="ri.vector.main.execute.4156447b-8bad-4af5-9150-010e304fa65a"),
+    everyone_cohort_de_id_testing=Input(rid="ri.vector.main.execute.0ca5c190-d2ae-492a-b291-66fd8092b269"),
+    procedure_occurrence_testing=Input(rid="ri.foundry.main.dataset.88523aaa-75c3-4b55-a79a-ebe27e40ba4f")
+)
+#Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
+#Creator/Owner/contact - Andrea Zhou
+#Last Update - 5/6/22
+#Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
+
+def everyone_procedures_of_interest_testing(everyone_cohort_de_id_testing, concept_set_members, procedure_occurrence_testing, customized_concept_set_input_testing):
+    everyone_cohort_de_id = everyone_cohort_de_id_testing
+    customized_concept_set_input = customized_concept_set_input_testing
+  
+    #bring in only cohort patient ids
+    persons = everyone_cohort_de_id_testing.select('person_id')
+    #filter procedure occurrence table to only cohort patients    
+    procedures_df = procedure_occurrence_testing \
+        .select('person_id','procedure_date','procedure_concept_id') \
+        .where(F.col('procedure_date').isNotNull()) \
+        .withColumnRenamed('procedure_date','visit_date') \
+        .withColumnRenamed('procedure_concept_id','concept_id') \
+        .join(persons,'person_id','inner')
+
+    #filter fusion sheet for concept sets and their future variable names that have concepts in the procedure domain
+    fusion_df = customized_concept_set_input \
+        .filter(customized_concept_set_input.domain.contains('procedure')) \
+        .select('concept_set_name','indicator_prefix')
+    #filter concept set members table to only concept ids for the procedures of interest
+    concepts_df = concept_set_members \
+        .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
+        .where(F.col('is_most_recent_version')=='true') \
+        .join(fusion_df, 'concept_set_name', 'inner') \
+        .select('concept_id','indicator_prefix')
+ 
+    #find procedure occurrence information based on matching concept ids for procedures of interest
+    df = procedures_df.join(concepts_df, 'concept_id', 'right')
+    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for procedures of interest    
+    df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
+
+    return df
+    
+
+#################################################
+## Global imports and functions included below ##
+#################################################
 
