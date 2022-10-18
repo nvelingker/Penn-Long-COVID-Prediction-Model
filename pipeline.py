@@ -1517,3 +1517,10 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
 
     return predictions
 
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.33ac2599-05a0-4928-a026-725b0b3714e0"),
+    Vaccine_fact_de_identified_testing=Input(rid="ri.foundry.main.dataset.9392c81b-bbbf-4e66-a366-a2e7e4f9db7b")
+)
+def unnamed(Vaccine_fact_de_identified_testing):
+    
+
