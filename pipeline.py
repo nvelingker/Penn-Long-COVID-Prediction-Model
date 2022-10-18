@@ -5,9 +5,9 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.0c6d6743-c3de-4142-97f2-870136062e0a"),
-    all_patients_visit_day_facts_table_de_id=Input(rid="ri.vector.main.execute.998f073b-6c2a-447c-8593-5de8998dc047"),
-    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e")
+    Output(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
+    all_patients_visit_day_facts_table_de_id=Input(rid="ri.foundry.main.dataset.ace57213-685a-4f18-a157-2b02b41086be"),
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
@@ -53,9 +53,9 @@ def all_patients_summary_fact_table_de_id(all_patients_visit_day_facts_table_de_
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.a7e85f36-1537-43bf-a5aa-3b454a01b2d9"),
-    all_patients_visit_day_facts_table_de_id_testing=Input(rid="ri.vector.main.execute.16276f02-e36f-4f1e-b74e-bf2f03fec74c"),
-    everyone_cohort_de_id_testing=Input(rid="ri.vector.main.execute.0ca5c190-d2ae-492a-b291-66fd8092b269")
+    Output(rid="ri.foundry.main.dataset.4b4d2bc0-b43f-4d63-abc6-ed115f0cd117"),
+    all_patients_visit_day_facts_table_de_id_testing=Input(rid="ri.foundry.main.dataset.7ace5232-cf55-4095-bb84-35ae2f2350ab"),
+    everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
@@ -103,14 +103,14 @@ def all_patients_summary_fact_table_de_id_testing(all_patients_visit_day_facts_t
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.998f073b-6c2a-447c-8593-5de8998dc047"),
-    everyone_conditions_of_interest=Input(rid="ri.vector.main.execute.fda1eca7-ed23-46f1-96f1-3c771194bd5b"),
-    everyone_devices_of_interest=Input(rid="ri.vector.main.execute.ae98106d-77ad-4cd5-9ee4-066d00ab0098"),
-    everyone_drugs_of_interest=Input(rid="ri.vector.main.execute.78498d4e-7181-4e75-9d9d-7468b64c5ee0"),
-    everyone_measurements_of_interest=Input(rid="ri.vector.main.execute.606758b7-753d-4fe7-a9ff-190c18388d2d"),
-    everyone_observations_of_interest=Input(rid="ri.vector.main.execute.415c777e-5e75-4689-be8f-637f374cf040"),
-    everyone_procedures_of_interest=Input(rid="ri.vector.main.execute.873aa4ba-3bc4-4864-bbab-5d11ddd4884b"),
-    everyone_vaccines_of_interest=Input(rid="ri.vector.main.execute.07edce2c-272d-4e48-9ad5-5b8275edbddd"),
+    Output(rid="ri.foundry.main.dataset.ace57213-685a-4f18-a157-2b02b41086be"),
+    everyone_conditions_of_interest=Input(rid="ri.foundry.main.dataset.514f3fe8-7565-4701-8982-174b43937006"),
+    everyone_devices_of_interest=Input(rid="ri.foundry.main.dataset.15ddf371-0d59-4397-9bee-866c880620cf"),
+    everyone_drugs_of_interest=Input(rid="ri.foundry.main.dataset.32bad30b-9322-4e6d-8a88-ab5133e98543"),
+    everyone_measurements_of_interest=Input(rid="ri.foundry.main.dataset.99e1cf7c-8848-4a3c-8f26-5cc7499311da"),
+    everyone_observations_of_interest=Input(rid="ri.foundry.main.dataset.d2eefa83-105e-404c-9e21-5475e1e1110c"),
+    everyone_procedures_of_interest=Input(rid="ri.foundry.main.dataset.ff38921a-cc27-4c35-9a09-9a7ccced1ad6"),
+    everyone_vaccines_of_interest=Input(rid="ri.foundry.main.dataset.202ec093-e569-4af8-897a-ab8d2c4325c0"),
     microvisits_to_macrovisits=Input(rid="ri.foundry.main.dataset.d77a701f-34df-48a1-a71c-b28112a07ffa")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
@@ -168,14 +168,14 @@ def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, ev
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.16276f02-e36f-4f1e-b74e-bf2f03fec74c"),
-    everyone_conditions_of_interest_testing=Input(rid="ri.vector.main.execute.53ac67c6-4b83-4354-9591-d4ed40cac3ae"),
-    everyone_devices_of_interest_testing=Input(rid="ri.vector.main.execute.905df3fe-1777-4ec7-93ae-e5ac46e50762"),
-    everyone_drugs_of_interest_testing=Input(rid="ri.vector.main.execute.49a46a48-21e3-4f9d-ae9e-67c7f3120fef"),
-    everyone_measurements_of_interest_testing=Input(rid="ri.vector.main.execute.b6e9730e-6d5d-4ee7-80e9-34db9d4f89cf"),
-    everyone_observations_of_interest_testing=Input(rid="ri.vector.main.execute.944ed1b3-eaf6-4134-b52b-3507c0267a90"),
-    everyone_procedures_of_interest_testing=Input(rid="ri.vector.main.execute.ff49312e-197f-4017-a29c-930f887d57ff"),
-    everyone_vaccines_of_interest_testing=Input(rid="ri.vector.main.execute.2cb9a3dc-e056-4ba7-9470-9cdf9ede4c94"),
+    Output(rid="ri.foundry.main.dataset.7ace5232-cf55-4095-bb84-35ae2f2350ab"),
+    everyone_conditions_of_interest_testing=Input(rid="ri.foundry.main.dataset.ae4f0220-6939-4f61-a97a-ff78d29df156"),
+    everyone_devices_of_interest_testing=Input(rid="ri.foundry.main.dataset.f423414f-5fc1-4b38-8019-a2176fd99de5"),
+    everyone_drugs_of_interest_testing=Input(rid="ri.foundry.main.dataset.c467232f-7ce8-493a-9c58-19438b8bae42"),
+    everyone_measurements_of_interest_testing=Input(rid="ri.foundry.main.dataset.947ff73f-4427-404f-b65b-2e709cdcbddd"),
+    everyone_observations_of_interest_testing=Input(rid="ri.foundry.main.dataset.746705a9-da68-43c5-8ad9-dad8ab4ab3cf"),
+    everyone_procedures_of_interest_testing=Input(rid="ri.foundry.main.dataset.a53998dc-abce-48c9-a390-b0cbf8b4a0a2"),
+    everyone_vaccines_of_interest_testing=Input(rid="ri.foundry.main.dataset.97cdf176-e012-49e9-8eff-6667e5f67e1a"),
     microvisits_to_macrovisits_testing=Input(rid="ri.foundry.main.dataset.f5008fa4-e736-4244-88e1-1da7a68efcdb")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
@@ -240,7 +240,7 @@ def all_patients_visit_day_facts_table_de_id_testing(everyone_conditions_of_inte
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.fab1d6ae-e7fb-434e-bf54-ddc10591ac6d"),
+    Output(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
     LL_DO_NOT_DELETE_REQUIRED_concept_sets_all=Input(rid="ri.foundry.main.dataset.029aa987-cfef-48fc-bf45-cffd3792cd93"),
     LL_concept_sets_fusion_everyone=Input(rid="ri.foundry.main.dataset.b36c87be-4e43-4f55-a1b2-fc48b0576a77")
 )
@@ -261,7 +261,7 @@ def customized_concept_set_input(LL_concept_sets_fusion_everyone, LL_DO_NOT_DELE
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.4156447b-8bad-4af5-9150-010e304fa65a"),
+    Output(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
     LL_DO_NOT_DELETE_REQUIRED_concept_sets_all=Input(rid="ri.foundry.main.dataset.029aa987-cfef-48fc-bf45-cffd3792cd93"),
     LL_concept_sets_fusion_everyone=Input(rid="ri.foundry.main.dataset.b36c87be-4e43-4f55-a1b2-fc48b0576a77")
 )
@@ -429,7 +429,7 @@ def deduplicated_testing(distinct_vax_person_testing):
     return df
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e"),
+    Output(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
     location=Input(rid="ri.foundry.main.dataset.4805affe-3a77-4260-8da5-4f9ff77f51ab"),
     manifest_safe_harbor=Input(rid="ri.foundry.main.dataset.b4407989-1851-4e07-a13f-0539fae10f26"),
@@ -574,7 +574,7 @@ def everyone_cohort_de_id(concept_set_members, person, location, manifest_safe_h
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.0ca5c190-d2ae-492a-b291-66fd8092b269"),
+    Output(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
     location_testing=Input(rid="ri.foundry.main.dataset.06b728e0-0262-4a7a-b9b7-fe91c3f7da34"),
     manifest_safe_harbor_testing=Input(rid="ri.foundry.main.dataset.7a5c5585-1c69-4bf5-9757-3fd0d0a209a2"),
@@ -719,11 +719,11 @@ def everyone_cohort_de_id_testing(concept_set_members, person_testing, location_
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.fda1eca7-ed23-46f1-96f1-3c771194bd5b"),
+    Output(rid="ri.foundry.main.dataset.514f3fe8-7565-4701-8982-174b43937006"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
     condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
-    customized_concept_set_input=Input(rid="ri.vector.main.execute.fab1d6ae-e7fb-434e-bf54-ddc10591ac6d"),
-    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e")
+    customized_concept_set_input=Input(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
@@ -766,11 +766,11 @@ def everyone_conditions_of_interest(everyone_cohort_de_id, concept_set_members, 
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.53ac67c6-4b83-4354-9591-d4ed40cac3ae"),
+    Output(rid="ri.foundry.main.dataset.ae4f0220-6939-4f61-a97a-ff78d29df156"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
     condition_occurrence_testing=Input(rid="ri.foundry.main.dataset.3e01546f-f110-4c67-a6db-9063d2939a74"),
-    customized_concept_set_input_testing=Input(rid="ri.vector.main.execute.4156447b-8bad-4af5-9150-010e304fa65a"),
-    everyone_cohort_de_id_testing=Input(rid="ri.vector.main.execute.0ca5c190-d2ae-492a-b291-66fd8092b269")
+    customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
+    everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
@@ -818,11 +818,11 @@ def everyone_conditions_of_interest_testing(everyone_cohort_de_id_testing, conce
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.ae98106d-77ad-4cd5-9ee4-066d00ab0098"),
+    Output(rid="ri.foundry.main.dataset.15ddf371-0d59-4397-9bee-866c880620cf"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
-    customized_concept_set_input=Input(rid="ri.vector.main.execute.fab1d6ae-e7fb-434e-bf54-ddc10591ac6d"),
+    customized_concept_set_input=Input(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
     device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
-    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e")
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
@@ -867,11 +867,11 @@ def everyone_devices_of_interest(device_exposure, everyone_cohort_de_id, concept
     
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.905df3fe-1777-4ec7-93ae-e5ac46e50762"),
+    Output(rid="ri.foundry.main.dataset.f423414f-5fc1-4b38-8019-a2176fd99de5"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
-    customized_concept_set_input_testing=Input(rid="ri.vector.main.execute.4156447b-8bad-4af5-9150-010e304fa65a"),
+    customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
     device_exposure_testing=Input(rid="ri.foundry.main.dataset.7e24a101-2206-45d9-bcaa-b9d84bd2f990"),
-    everyone_cohort_de_id_testing=Input(rid="ri.vector.main.execute.0ca5c190-d2ae-492a-b291-66fd8092b269")
+    everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
@@ -918,11 +918,11 @@ def everyone_devices_of_interest_testing(device_exposure_testing, everyone_cohor
     
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.78498d4e-7181-4e75-9d9d-7468b64c5ee0"),
+    Output(rid="ri.foundry.main.dataset.32bad30b-9322-4e6d-8a88-ab5133e98543"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
-    customized_concept_set_input=Input(rid="ri.vector.main.execute.fab1d6ae-e7fb-434e-bf54-ddc10591ac6d"),
+    customized_concept_set_input=Input(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
     drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
-    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e")
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
@@ -965,11 +965,11 @@ def everyone_drugs_of_interest(concept_set_members, drug_exposure, everyone_coho
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.49a46a48-21e3-4f9d-ae9e-67c7f3120fef"),
+    Output(rid="ri.foundry.main.dataset.c467232f-7ce8-493a-9c58-19438b8bae42"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
-    customized_concept_set_input_testing=Input(rid="ri.vector.main.execute.4156447b-8bad-4af5-9150-010e304fa65a"),
+    customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
     drug_exposure_testing=Input(rid="ri.foundry.main.dataset.26a51cab-0279-45a6-bbc0-f44a12b52f9c"),
-    everyone_cohort_de_id_testing=Input(rid="ri.vector.main.execute.0ca5c190-d2ae-492a-b291-66fd8092b269")
+    everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
@@ -1014,9 +1014,9 @@ def everyone_drugs_of_interest_testing(concept_set_members, drug_exposure_testin
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.606758b7-753d-4fe7-a9ff-190c18388d2d"),
+    Output(rid="ri.foundry.main.dataset.99e1cf7c-8848-4a3c-8f26-5cc7499311da"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
-    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e"),
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
     measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
@@ -1119,9 +1119,9 @@ def everyone_measurements_of_interest(measurement, concept_set_members, everyone
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.b6e9730e-6d5d-4ee7-80e9-34db9d4f89cf"),
+    Output(rid="ri.foundry.main.dataset.947ff73f-4427-404f-b65b-2e709cdcbddd"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
-    everyone_cohort_de_id_testing=Input(rid="ri.vector.main.execute.0ca5c190-d2ae-492a-b291-66fd8092b269"),
+    everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
     measurement_testing=Input(rid="ri.foundry.main.dataset.b7749e49-cf01-4d0a-a154-2f00eecab21e")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
@@ -1225,10 +1225,10 @@ def everyone_measurements_of_interest_testing(measurement_testing, concept_set_m
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.415c777e-5e75-4689-be8f-637f374cf040"),
+    Output(rid="ri.foundry.main.dataset.d2eefa83-105e-404c-9e21-5475e1e1110c"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
-    customized_concept_set_input=Input(rid="ri.vector.main.execute.fab1d6ae-e7fb-434e-bf54-ddc10591ac6d"),
-    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e"),
+    customized_concept_set_input=Input(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
     observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
@@ -1267,10 +1267,10 @@ def everyone_observations_of_interest(observation, concept_set_members, everyone
     return df
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.944ed1b3-eaf6-4134-b52b-3507c0267a90"),
+    Output(rid="ri.foundry.main.dataset.746705a9-da68-43c5-8ad9-dad8ab4ab3cf"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
-    customized_concept_set_input_testing=Input(rid="ri.vector.main.execute.4156447b-8bad-4af5-9150-010e304fa65a"),
-    everyone_cohort_de_id_testing=Input(rid="ri.vector.main.execute.0ca5c190-d2ae-492a-b291-66fd8092b269"),
+    customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
+    everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
     observation_testing=Input(rid="ri.foundry.main.dataset.fc1ce22e-9cf6-4335-8ca7-aa8c733d506d")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
@@ -1311,10 +1311,10 @@ def everyone_observations_of_interest_testing(observation_testing, concept_set_m
     return df
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.873aa4ba-3bc4-4864-bbab-5d11ddd4884b"),
+    Output(rid="ri.foundry.main.dataset.ff38921a-cc27-4c35-9a09-9a7ccced1ad6"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
-    customized_concept_set_input=Input(rid="ri.vector.main.execute.fab1d6ae-e7fb-434e-bf54-ddc10591ac6d"),
-    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e"),
+    customized_concept_set_input=Input(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
     procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
@@ -1358,10 +1358,10 @@ def everyone_procedures_of_interest(everyone_cohort_de_id, concept_set_members, 
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.ff49312e-197f-4017-a29c-930f887d57ff"),
+    Output(rid="ri.foundry.main.dataset.a53998dc-abce-48c9-a390-b0cbf8b4a0a2"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
-    customized_concept_set_input_testing=Input(rid="ri.vector.main.execute.4156447b-8bad-4af5-9150-010e304fa65a"),
-    everyone_cohort_de_id_testing=Input(rid="ri.vector.main.execute.0ca5c190-d2ae-492a-b291-66fd8092b269"),
+    customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
+    everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
     procedure_occurrence_testing=Input(rid="ri.foundry.main.dataset.88523aaa-75c3-4b55-a79a-ebe27e40ba4f")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
@@ -1407,9 +1407,9 @@ def everyone_procedures_of_interest_testing(everyone_cohort_de_id_testing, conce
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.07edce2c-272d-4e48-9ad5-5b8275edbddd"),
+    Output(rid="ri.foundry.main.dataset.202ec093-e569-4af8-897a-ab8d2c4325c0"),
     Vaccine_fact_de_identified=Input(rid="ri.vector.main.execute.7641dae2-3118-4a2c-8a89-e4f646cbf18f"),
-    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e")
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf")
 )
 def everyone_vaccines_of_interest(everyone_cohort_de_id, Vaccine_fact_de_identified):
     vaccine_fact_de_identified = Vaccine_fact_de_identified
@@ -1445,9 +1445,9 @@ def everyone_vaccines_of_interest(everyone_cohort_de_id, Vaccine_fact_de_identif
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.2cb9a3dc-e056-4ba7-9470-9cdf9ede4c94"),
-    Vaccine_fact_de_identified_testing=Input(rid="ri.vector.main.execute.8367b74c-b174-457d-8423-c636b9aa04b3"),
-    everyone_cohort_de_id_testing=Input(rid="ri.vector.main.execute.0ca5c190-d2ae-492a-b291-66fd8092b269")
+    Output(rid="ri.foundry.main.dataset.97cdf176-e012-49e9-8eff-6667e5f67e1a"),
+    Vaccine_fact_de_identified_testing=Input(rid="ri.foundry.main.dataset.9392c81b-bbbf-4e66-a366-a2e7e4f9db7b"),
+    everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4")
 )
 def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine_fact_de_identified_testing):
     everyone_cohort_de_id = everyone_cohort_de_id_testing
@@ -1484,10 +1484,10 @@ def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine
 #################################################
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.6ba08a81-0371-4a67-b4d6-9887ba853916"),
+    Output(rid="ri.foundry.main.dataset.ea6c836a-9d51-4402-b1b7-0e30fb514fc8"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
-    all_patients_summary_fact_table_de_id=Input(rid="ri.vector.main.execute.0c6d6743-c3de-4142-97f2-870136062e0a"),
-    all_patients_summary_fact_table_de_id_testing=Input(rid="ri.vector.main.execute.a7e85f36-1537-43bf-a5aa-3b454a01b2d9")
+    all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
+    all_patients_summary_fact_table_de_id_testing=Input(rid="ri.foundry.main.dataset.4b4d2bc0-b43f-4d63-abc6-ed115f0cd117")
 )
 def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary_fact_table_de_id_testing, Long_COVID_Silver_Standard):
     

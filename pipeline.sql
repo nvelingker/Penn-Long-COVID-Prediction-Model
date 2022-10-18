@@ -27,7 +27,7 @@ FROM sql_pivot_vax_person a LEFT JOIN aggregate_person b on a.person_id = b.pers
 WHERE vaccine_txn < 5
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.8367b74c-b174-457d-8423-c636b9aa04b3"),
+    Output(rid="ri.foundry.main.dataset.9392c81b-bbbf-4e66-a366-a2e7e4f9db7b"),
     aggregate_person_testing=Input(rid="ri.vector.main.execute.47a29e5a-88f1-4a48-8615-bb98ab911fca"),
     sql_pivot_vax_person_testing=Input(rid="ri.vector.main.execute.b7372302-6638-40c4-ad0c-4f6ab67373da")
 )
@@ -259,8 +259,8 @@ pivot (
 )
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.16c82ac5-1424-43f9-a48c-f3b3d19b8816"),
-    train_test_model=Input(rid="ri.vector.main.execute.6ba08a81-0371-4a67-b4d6-9887ba853916")
+    Output(rid="ri.foundry.main.dataset.4e2bf601-5e1d-4116-9dee-f3baefd298c9"),
+    train_test_model=Input(rid="ri.foundry.main.dataset.ea6c836a-9d51-4402-b1b7-0e30fb514fc8")
 )
 SELECT *
 FROM train_test_model
