@@ -5,6 +5,71 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 
 @transform_pandas(
+    Output(rid="ri.vector.main.execute.998f073b-6c2a-447c-8593-5de8998dc047"),
+    everyone_conditions_of_interest=Input(rid="ri.vector.main.execute.fda1eca7-ed23-46f1-96f1-3c771194bd5b"),
+    everyone_devices_of_interest=Input(rid="ri.vector.main.execute.ae98106d-77ad-4cd5-9ee4-066d00ab0098"),
+    everyone_drugs_of_interest=Input(rid="ri.vector.main.execute.78498d4e-7181-4e75-9d9d-7468b64c5ee0"),
+    everyone_measurements_of_interest=Input(rid="ri.vector.main.execute.606758b7-753d-4fe7-a9ff-190c18388d2d"),
+    everyone_observations_of_interest=Input(rid="ri.vector.main.execute.415c777e-5e75-4689-be8f-637f374cf040"),
+    everyone_procedures_of_interest=Input(rid="ri.vector.main.execute.873aa4ba-3bc4-4864-bbab-5d11ddd4884b"),
+    everyone_vaccines_of_interest=Input(rid="ri.vector.main.execute.07edce2c-272d-4e48-9ad5-5b8275edbddd"),
+    microvisits_to_macrovisits=Input(rid="ri.foundry.main.dataset.d77a701f-34df-48a1-a71c-b28112a07ffa")
+)
+#Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
+#Creator/Owner/contact - Andrea Zhou
+#Last Update - 7/8/22
+#Description - All facts collected in the previous steps are combined in this cohort_all_facts_table on the basis of unique visit days for each patient. Indicators are created for the presence or absence of events, medications, conditions, measurements, device exposures, observations, procedures, and outcomes.  It also creates an indicator for whether the visit date where a fact was noted occurred during any hospitalization. This table is useful if the analyst needs to use actual dates of events as it provides more detail than the final patient-level table.  Use the max and min functions to find the first and last occurrences of any events.
+
+def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, everyone_measurements_of_interest, everyone_procedures_of_interest, everyone_observations_of_interest, everyone_drugs_of_interest, everyone_devices_of_interest, microvisits_to_macrovisits, everyone_vaccines_of_interest):
+
+    macrovisits_df = microvisits_to_macrovisits
+    vaccines_df = everyone_vaccines_of_interest
+    procedures_df = everyone_procedures_of_interest
+    devices_df = everyone_devices_of_interest
+    observations_df = everyone_observations_of_interest
+    conditions_df = everyone_conditions_of_interest
+    drugs_df = everyone_drugs_of_interest
+    measurements_df = everyone_measurements_of_interest
+
+    df = macrovisits_df.select('person_id','visit_start_date').withColumnRenamed('visit_start_date','visit_date')
+    df = df.join(vaccines_df, on=list(set(df.columns)&set(vaccines_df.columns)), how='outer')
+    df = df.join(procedures_df, on=list(set(df.columns)&set(procedures_df.columns)), how='outer')
+    df = df.join(devices_df, on=list(set(df.columns)&set(devices_df.columns)), how='outer')
+    df = df.join(observations_df, on=list(set(df.columns)&set(observations_df.columns)), how='outer')
+    df = df.join(conditions_df, on=list(set(df.columns)&set(conditions_df.columns)), how='outer')
+    df = df.join(drugs_df, on=list(set(df.columns)&set(drugs_df.columns)), how='outer')
+    df = df.join(measurements_df, on=list(set(df.columns)&set(measurements_df.columns)), how='outer')    
+    
+    df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
+   
+    #add F.max of all indicator columns to collapse all cross-domain flags to unique person and visit rows
+    #each visit_date represents the date of the event or fact being noted in the patient's medical record
+    df = df.groupby('person_id', 'visit_date').agg(*[F.max(col).alias(col) for col in df.columns if col not in ('person_id','visit_date')])
+   
+    #create and join in flag that indicates whether the visit day was during a macrovisit (1) or not (0)
+    #any conditions, observations, procedures, devices, drugs, measurements, and/or death flagged 
+    #with a (1) on that particular visit date would then be considered to have happened during a macrovisit
+    macrovisits_df = macrovisits_df \
+        .select('person_id', 'macrovisit_start_date', 'macrovisit_end_date') \
+        .where(F.col('macrovisit_start_date').isNotNull() & F.col('macrovisit_end_date').isNotNull()) \
+        .distinct()
+    df_hosp = df.select('person_id', 'visit_date').join(macrovisits_df, on=['person_id'], how= 'outer')
+    df_hosp = df_hosp.withColumn('during_macrovisit_hospitalization', F.when((F.datediff("macrovisit_end_date","visit_date")>=0) & (F.datediff("macrovisit_start_date","visit_date")<=0), 1).otherwise(0)) \
+        .drop('macrovisit_start_date', 'macrovisit_end_date') \
+        .where(F.col('during_macrovisit_hospitalization') == 1) \
+        .distinct()
+    df = df.join(df_hosp, on=['person_id','visit_date'], how="left")   
+
+    #final fill of null in non-continuous variables with 0
+    df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
+
+    return df
+    
+#################################################
+## Global imports and functions included below ##
+#################################################
+
+@transform_pandas(
     Output(rid="ri.vector.main.execute.fab1d6ae-e7fb-434e-bf54-ddc10591ac6d"),
     LL_DO_NOT_DELETE_REQUIRED_concept_sets_all=Input(rid="ri.foundry.main.dataset.029aa987-cfef-48fc-bf45-cffd3792cd93"),
     LL_concept_sets_fusion_everyone=Input(rid="ri.foundry.main.dataset.b36c87be-4e43-4f55-a1b2-fc48b0576a77")
@@ -1166,6 +1231,83 @@ def everyone_procedures_of_interest_testing(everyone_cohort_de_id_testing, conce
 
     return df
     
+
+#################################################
+## Global imports and functions included below ##
+#################################################
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.07edce2c-272d-4e48-9ad5-5b8275edbddd"),
+    Vaccine_fact_de_identified=Input(rid="ri.vector.main.execute.7641dae2-3118-4a2c-8a89-e4f646cbf18f"),
+    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e")
+)
+def everyone_vaccines_of_interest(everyone_cohort_de_id, Vaccine_fact_de_identified):
+    vaccine_fact_de_identified = Vaccine_fact_de_identified
+    
+    persons = everyone_cohort_de_id.select('person_id')
+    vax_df = Vaccine_fact_de_identified.select('person_id', '1_vax_date', '2_vax_date', '3_vax_date', '4_vax_date') \
+        .join(persons, 'person_id', 'inner')
+
+    first_dose = vax_df.select('person_id', '1_vax_date') \
+        .withColumnRenamed('1_vax_date', 'visit_date') \
+        .where(F.col('visit_date').isNotNull())
+    second_dose = vax_df.select('person_id', '2_vax_date') \
+        .withColumnRenamed('2_vax_date', 'visit_date') \
+        .where(F.col('visit_date').isNotNull())        
+    third_dose = vax_df.select('person_id', '3_vax_date') \
+        .withColumnRenamed('3_vax_date', 'visit_date') \
+        .where(F.col('visit_date').isNotNull())
+    fourth_dose = vax_df.select('person_id', '4_vax_date') \
+        .withColumnRenamed('4_vax_date', 'visit_date') \
+        .where(F.col('visit_date').isNotNull())
+
+    df = first_dose.join(second_dose, on=['person_id', 'visit_date'], how='outer') \
+        .join(third_dose, on=['person_id', 'visit_date'], how='outer') \
+        .join(fourth_dose, on=['person_id', 'visit_date'], how='outer') \
+        .distinct()
+
+    df = df.withColumn('had_vaccine_administered', F.lit(1))
+
+    return df
+
+#################################################
+## Global imports and functions included below ##
+#################################################
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.2cb9a3dc-e056-4ba7-9470-9cdf9ede4c94"),
+    Vaccine_fact_de_identified_testing=Input(rid="ri.vector.main.execute.8367b74c-b174-457d-8423-c636b9aa04b3"),
+    everyone_cohort_de_id_testing=Input(rid="ri.vector.main.execute.0ca5c190-d2ae-492a-b291-66fd8092b269")
+)
+def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine_fact_de_identified_testing):
+    everyone_cohort_de_id = everyone_cohort_de_id_testing
+    vaccine_fact_de_identified = Vaccine_fact_de_identified_testing
+    
+    persons = everyone_cohort_de_id_testing.select('person_id')
+    vax_df = Vaccine_fact_de_identified_testing.select('person_id', '1_vax_date', '2_vax_date', '3_vax_date', '4_vax_date') \
+        .join(persons, 'person_id', 'inner')
+
+    first_dose = vax_df.select('person_id', '1_vax_date') \
+        .withColumnRenamed('1_vax_date', 'visit_date') \
+        .where(F.col('visit_date').isNotNull())
+    second_dose = vax_df.select('person_id', '2_vax_date') \
+        .withColumnRenamed('2_vax_date', 'visit_date') \
+        .where(F.col('visit_date').isNotNull())        
+    third_dose = vax_df.select('person_id', '3_vax_date') \
+        .withColumnRenamed('3_vax_date', 'visit_date') \
+        .where(F.col('visit_date').isNotNull())
+    fourth_dose = vax_df.select('person_id', '4_vax_date') \
+        .withColumnRenamed('4_vax_date', 'visit_date') \
+        .where(F.col('visit_date').isNotNull())
+
+    df = first_dose.join(second_dose, on=['person_id', 'visit_date'], how='outer') \
+        .join(third_dose, on=['person_id', 'visit_date'], how='outer') \
+        .join(fourth_dose, on=['person_id', 'visit_date'], how='outer') \
+        .distinct()
+
+    df = df.withColumn('had_vaccine_administered', F.lit(1))
+
+    return df
 
 #################################################
 ## Global imports and functions included below ##
