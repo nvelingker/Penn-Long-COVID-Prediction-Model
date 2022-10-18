@@ -1,6 +1,58 @@
 
 
 @transform_pandas(
+    Output(rid="ri.vector.main.execute.7641dae2-3118-4a2c-8a89-e4f646cbf18f"),
+    aggregate_person=Input(rid="ri.vector.main.execute.0c8d244b-83b0-4a73-9488-3db78097ac5a"),
+    sql_pivot_vax_person=Input(rid="ri.vector.main.execute.c2687a32-aea0-4394-ae9d-b488d148563e")
+)
+SELECT distinct
+    a.person_id, 
+    a.data_partner_id,
+    b.vaccine_txn,
+    datediff(2_vax_date, 1_vax_date) date_diff_1_2,
+    datediff(3_vax_date, 2_vax_date) date_diff_2_3, 
+    datediff(4_vax_date, 3_vax_date) date_diff_3_4, 
+    case when 1_vax_type != 2_vax_type and 1_vax_date != 2_vax_date then 1 else 0 end as switch_1_2,
+    case when 2_vax_type != 3_vax_type and 2_vax_date != 3_vax_date then 1 else 0 end as switch_2_3,
+    case when 3_vax_type != 4_vax_type and 3_vax_date != 4_vax_date then 1 else 0 end as switch_3_4,
+    1_vax_date,
+    1_vax_type,
+    2_vax_date,
+    2_vax_type,
+    3_vax_date,
+    3_vax_type,
+    4_vax_date,
+    4_vax_type
+FROM sql_pivot_vax_person a LEFT JOIN aggregate_person b on a.person_id = b.person_id
+WHERE vaccine_txn < 5
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.8367b74c-b174-457d-8423-c636b9aa04b3"),
+    aggregate_person_testing=Input(rid="ri.vector.main.execute.47a29e5a-88f1-4a48-8615-bb98ab911fca"),
+    sql_pivot_vax_person_testing=Input(rid="ri.vector.main.execute.b7372302-6638-40c4-ad0c-4f6ab67373da")
+)
+SELECT distinct
+    a.person_id, 
+    a.data_partner_id,
+    b.vaccine_txn,
+    datediff(2_vax_date, 1_vax_date) date_diff_1_2,
+    datediff(3_vax_date, 2_vax_date) date_diff_2_3, 
+    datediff(4_vax_date, 3_vax_date) date_diff_3_4, 
+    case when 1_vax_type != 2_vax_type and 1_vax_date != 2_vax_date then 1 else 0 end as switch_1_2,
+    case when 2_vax_type != 3_vax_type and 2_vax_date != 3_vax_date then 1 else 0 end as switch_2_3,
+    case when 3_vax_type != 4_vax_type and 3_vax_date != 4_vax_date then 1 else 0 end as switch_3_4,
+    1_vax_date,
+    1_vax_type,
+    2_vax_date,
+    2_vax_type,
+    3_vax_date,
+    3_vax_type,
+    4_vax_date,
+    4_vax_type
+FROM sql_pivot_vax_person_testing a LEFT JOIN aggregate_person_testing b on a.person_id = b.person_id
+WHERE vaccine_txn < 5
+
+@transform_pandas(
     Output(rid="ri.vector.main.execute.0c8d244b-83b0-4a73-9488-3db78097ac5a"),
     deduplicated=Input(rid="ri.vector.main.execute.ec478f23-d29c-4d13-924b-e3b462b7a054")
 )
@@ -183,6 +235,22 @@ select * from (
     select person_id, data_partner_id, 
     row_number() over (partition by person_id order by person_id, vax_date) as number, vax_type, vax_date 
     from deduplicated 
+) A 
+
+pivot (
+    max(vax_date) as vax_date, max(vax_type) as vax_type 
+    for number in (1,2,3,4) 
+)
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.b7372302-6638-40c4-ad0c-4f6ab67373da"),
+    deduplicated_testing=Input(rid="ri.vector.main.execute.708dc926-ae90-4f99-bb13-f3957d642c78")
+)
+
+select * from (
+    select person_id, data_partner_id, 
+    row_number() over (partition by person_id order by person_id, vax_date) as number, vax_type, vax_date 
+    from deduplicated_testing
 ) A 
 
 pivot (
