@@ -47,6 +47,79 @@ def customized_concept_set_input_testing(LL_concept_sets_fusion_everyone, LL_DO_
 #################################################
 
 @transform_pandas(
+    Output(rid="ri.vector.main.execute.ec478f23-d29c-4d13-924b-e3b462b7a054"),
+    distinct_vax_person=Input(rid="ri.vector.main.execute.8a3be0e3-a478-40ab-83b1-7289e3fc5136")
+)
+# Records for shots are often duplicated on different days, especially
+# in the procedures table for site 406. For that site, if shots are
+# less than 21 days apart, use the earlier date and drop the latter.
+
+# 2711123981570257420
+
+from pyspark.sql.window import Window
+import pyspark.sql.functions as f
+
+def deduplicated(distinct_vax_person):
+
+    ################################################################################
+    # 1. Resolve same day vaccinations with conflicting types. If one is null, use #
+    #    the other. With multiple valid types, make null.                          #
+    ################################################################################
+
+    # Filter down to unique combinations of person, day, and vaccine type then drop
+    # null values.
+    vax_types = distinct_vax_person.dropDuplicates(
+        ['person_id', 'vax_date', 'vax_type']
+    ).filter(
+        "vax_type is not NULL"
+    )
+
+    # Count number of types per person and day
+    w = Window.partitionBy('person_id', 'vax_date')
+    count_type = vax_types.select(
+        'person_id', 
+        'vax_date',
+        'vax_type',
+        f.count('person_id').over(w).alias('n')
+    )
+
+    # Drop rows with multiple values so they end up null after future join
+    vax_types = count_type.filter(
+        count_type.n == 1
+    ).drop('n')
+
+    # Drop original vax_type and merge this new one back into dataframe
+    df = distinct_vax_person.drop(
+        'vax_type'
+    ).join(vax_types, on=['person_id', 'vax_date'], how='left')
+
+    ################################################################################
+    # 2. Deduplicate vaccines that are too close to be reasonable. Site 406 has    #
+    #    extra issues due to using procedures table, so be more aggressive there.  #
+    ################################################################################
+
+    # Window by person_id
+    w = Window.partitionBy('person_id').orderBy('vax_date')
+    
+    # Get difference between each shot in days
+    df = df.withColumn(
+        'lag_date', f.lag('vax_date', default='2000-01-01').over(w)
+    ).withColumn(
+        'date_diff', f.datediff('vax_date', 'lag_date')
+    )
+
+    # For site 406, filter if less than 14. For everyone else, filter if less than 5
+    df = df.filter(
+        (
+            (df.data_partner_id == 406) & (df.date_diff >= 14)
+        ) | (
+            (df.data_partner_id != 406) & (df.date_diff >= 5)
+        )
+    )
+
+    return df
+
+@transform_pandas(
     Output(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
     location=Input(rid="ri.foundry.main.dataset.4805affe-3a77-4260-8da5-4f9ff77f51ab"),
@@ -337,6 +410,53 @@ def everyone_cohort_de_id_testing(concept_set_members, person_testing, location_
 #################################################
 
 @transform_pandas(
+    Output(rid="ri.vector.main.execute.fda1eca7-ed23-46f1-96f1-3c771194bd5b"),
+    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
+    customized_concept_set_input=Input(rid="ri.vector.main.execute.fab1d6ae-e7fb-434e-bf54-ddc10591ac6d"),
+    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e")
+)
+#Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
+#Creator/Owner/contact - Andrea Zhou
+#Last Update - 5/6/22
+#Description - This node filters the condition_eras table for rows that have a condition_concept_id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these conditions are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
+
+def everyone_conditions_of_interest(everyone_cohort_de_id, concept_set_members, condition_occurrence, customized_concept_set_input):
+
+    #bring in only cohort patient ids
+    persons = everyone_cohort_de_id.select('person_id')
+    #filter observations table to only cohort patients    
+    conditions_df = condition_occurrence \
+        .select('person_id', 'condition_start_date', 'condition_concept_id') \
+        .where(F.col('condition_start_date').isNotNull()) \
+        .withColumnRenamed('condition_start_date','visit_date') \
+        .withColumnRenamed('condition_concept_id','concept_id') \
+        .join(persons,'person_id','inner')
+
+    #filter fusion sheet for concept sets and their future variable names that have concepts in the conditions domain
+    fusion_df = customized_concept_set_input \
+        .filter(customized_concept_set_input.domain.contains('condition')) \
+        .select('concept_set_name','indicator_prefix')
+    #filter concept set members table to only concept ids for the conditions of interest
+    concepts_df = concept_set_members \
+        .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
+        .where(F.col('is_most_recent_version')=='true') \
+        .join(fusion_df, 'concept_set_name', 'inner') \
+        .select('concept_id','indicator_prefix')
+
+    #find conditions information based on matching concept ids for conditions of interest
+    df = conditions_df.join(concepts_df, 'concept_id', 'inner')
+    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for conditions of interest    
+    df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
+   
+    return df
+    
+
+#################################################
+## Global imports and functions included below ##
+#################################################
+
+@transform_pandas(
     Output(rid="ri.vector.main.execute.53ac67c6-4b83-4354-9591-d4ed40cac3ae"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
     condition_occurrence_testing=Input(rid="ri.foundry.main.dataset.3e01546f-f110-4c67-a6db-9063d2939a74"),
@@ -487,6 +607,53 @@ def everyone_devices_of_interest_testing(device_exposure_testing, everyone_cohor
 #################################################
 
     
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.78498d4e-7181-4e75-9d9d-7468b64c5ee0"),
+    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    customized_concept_set_input=Input(rid="ri.vector.main.execute.fab1d6ae-e7fb-434e-bf54-ddc10591ac6d"),
+    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
+    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e")
+)
+#Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
+#Creator/Owner/contact - Andrea Zhou
+#Last Update - 5/6/22
+#Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
+
+def everyone_drugs_of_interest(concept_set_members, drug_exposure, everyone_cohort_de_id, customized_concept_set_input):
+  
+    #bring in only cohort patient ids
+    persons = everyone_cohort_de_id.select('person_id')
+    #filter drug exposure table to only cohort patients    
+    drug_df = drug_exposure \
+        .select('person_id','drug_exposure_start_date','drug_concept_id') \
+        .where(F.col('drug_exposure_start_date').isNotNull()) \
+        .withColumnRenamed('drug_exposure_start_date','visit_date') \
+        .withColumnRenamed('drug_concept_id','concept_id') \
+        .join(persons,'person_id','inner')
+
+    #filter fusion sheet for concept sets and their future variable names that have concepts in the drug domain
+    fusion_df = customized_concept_set_input \
+        .filter(customized_concept_set_input.domain.contains('drug')) \
+        .select('concept_set_name','indicator_prefix')
+    #filter concept set members table to only concept ids for the drugs of interest
+    concepts_df = concept_set_members \
+        .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
+        .where(F.col('is_most_recent_version')=='true') \
+        .join(fusion_df, 'concept_set_name', 'inner') \
+        .select('concept_id','indicator_prefix')
+        
+    #find drug exposure information based on matching concept ids for drugs of interest
+    df = drug_df.join(concepts_df, 'concept_id', 'inner')
+    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for drugs of interest
+    df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
+
+    return df
+    
+
+#################################################
+## Global imports and functions included below ##
+#################################################
 
 @transform_pandas(
     Output(rid="ri.vector.main.execute.49a46a48-21e3-4f9d-ae9e-67c7f3120fef"),
@@ -747,6 +914,48 @@ def everyone_measurements_of_interest_testing(measurement_testing, concept_set_m
 #################################################
 ## Global imports and functions included below ##
 #################################################
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.415c777e-5e75-4689-be8f-637f374cf040"),
+    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    customized_concept_set_input=Input(rid="ri.vector.main.execute.fab1d6ae-e7fb-434e-bf54-ddc10591ac6d"),
+    everyone_cohort_de_id=Input(rid="ri.vector.main.execute.8dc65c1f-39e5-4bb7-b5c0-161a2f87aa0e"),
+    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516")
+)
+#Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
+#Creator/Owner/contact - Andrea Zhou
+#Last Update - 5/6/22
+#Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
+
+def everyone_observations_of_interest(observation, concept_set_members, everyone_cohort_de_id, customized_concept_set_input):
+   
+    #bring in only cohort patient ids
+    persons = everyone_cohort_de_id.select('person_id')
+    #filter observations table to only cohort patients    
+    observations_df = observation \
+        .select('person_id','observation_date','observation_concept_id') \
+        .where(F.col('observation_date').isNotNull()) \
+        .withColumnRenamed('observation_date','visit_date') \
+        .withColumnRenamed('observation_concept_id','concept_id') \
+        .join(persons,'person_id','inner')
+
+    #filter fusion sheet for concept sets and their future variable names that have concepts in the observations domain
+    fusion_df = customized_concept_set_input \
+        .filter(customized_concept_set_input.domain.contains('observation')) \
+        .select('concept_set_name','indicator_prefix')
+    #filter concept set members table to only concept ids for the observations of interest
+    concepts_df = concept_set_members \
+        .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
+        .where(F.col('is_most_recent_version')=='true') \
+        .join(fusion_df, 'concept_set_name', 'inner') \
+        .select('concept_id','indicator_prefix')
+
+    #find observations information based on matching concept ids for observations of interest
+    df = observations_df.join(concepts_df, 'concept_id', 'inner')
+    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for observations of interest    
+    df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
+
+    return df
 
 @transform_pandas(
     Output(rid="ri.vector.main.execute.944ed1b3-eaf6-4134-b52b-3507c0267a90"),
