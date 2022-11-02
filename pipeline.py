@@ -1514,7 +1514,7 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     
     training_predictions = pd.DataFrame.from_dict({
         'person_id': list(all_patients_summary_fact_table_de_id["person_id"]),
-        'outcome_likelihood': preds.tolist()
+        'outcome_likelihood': training_preds.tolist()
     }, orient='columns')
 
     predictions = pd.DataFrame.from_dict({
