@@ -1522,6 +1522,5 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
         'outcome_likelihood': preds.tolist()
     }, orient='columns')
 
-    #return predictions
-    return training_predictions
+    return predictions
 
