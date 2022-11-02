@@ -1509,11 +1509,18 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     clf = LogisticRegression(penalty='l2', solver='liblinear', random_state=0, max_iter=500).fit(Training, Outcome)
 
     preds = clf.predict_proba(Testing)[:,1]
+
+    training_preds = clf.predict_proba(Training)[:,1]
     
+    training_predictions = pd.DataFrame.from_dict({
+        'person_id': list(all_patients_summary_fact_table_de_id["person_id"]),
+        'outcome_likelihood': preds.tolist()
+    }, orient='columns')
+
     predictions = pd.DataFrame.from_dict({
         'person_id': list(all_patients_summary_fact_table_de_id_testing["person_id"]),
         'outcome_likelihood': preds.tolist()
     }, orient='columns')
 
-    return predictions
+    return predictions, training_predictions
 
