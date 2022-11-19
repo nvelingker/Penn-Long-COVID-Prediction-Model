@@ -3,6 +3,13 @@ from pyspark.sql.types import IntegerType
 
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import mean_squared_error
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import classification_report
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
@@ -1497,30 +1504,57 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     
     ## get outcome column
     Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
-    Outcome = all_patients_summary_fact_table_de_id[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
-    Outcome = Long_COVID_Silver_Standard[["person_id", "outcome"]]
+    Outcome_df = all_patients_summary_fact_table_de_id[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
+    Outcome_df = Outcome_df[["person_id", "outcome"]].sort_values('person_id')
 
-    
-    Outcome = list(Outcome[["person_id", "outcome"]].set_index("person_id")["outcome"])
-    Training = all_patients_summary_fact_table_de_id[cols].set_index("person_id").fillna(0.0).to_numpy()
-    Testing = all_patients_summary_fact_table_de_id_testing[cols].set_index("person_id").fillna(0.0).to_numpy()
-    
-    
-    clf = LogisticRegression(penalty='l2', solver='liblinear', random_state=0, max_iter=500).fit(Training, Outcome)
+    Outcome = list(Outcome_df["outcome"])
 
-    preds = clf.predict_proba(Testing)[:,1]
+    Training_and_Holdout = all_patients_summary_fact_table_de_id[cols].fillna(0.0).sort_values('person_id')
+    #Testing = all_patients_summary_fact_table_de_id_testing[cols].fillna(0.0)
+    X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
 
-    training_preds = clf.predict_proba(Training)[:,1]
-    
-    training_predictions = pd.DataFrame.from_dict({
-        'person_id': list(all_patients_summary_fact_table_de_id["person_id"]),
-        'outcome_likelihood': training_preds.tolist()
+    lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
+    rfc = RandomForestClassifier().fit(X_train, y_train)
+    gbc = GradientBoostingClassifier().fit(X_train, y_train)
+
+    nn_scaler = StandardScaler().fit(X_train)
+    nnc = MLPClassifier(solver='sgd', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
+
+    #preds = clf.predict_proba(Testing)[:,1]
+
+    lr_test_preds = lrc.predict(X_test)
+    rf_test_preds = rfc.predict(X_test)
+    gb_test_preds = gbc.predict(X_test)
+    nnc_test_preds = nnc.predict(nn_scaler.transform(X_test))
+
+    #test_df = 
+    test_predictions = pd.DataFrame.from_dict({
+        'person_id': list(X_test_no_ind["person_id"]),
+        'lr_outcome': lr_test_preds.tolist(),
+        'rf_outcome': rf_test_preds.tolist(),
+        'gb_outcome': gb_test_preds.tolist(),
+        'nn_outcome': nnc_test_preds.tolist(),
     }, orient='columns')
+    
+    test_predictions = test_predictions.merge(Outcome_df, on="person_id", how="left")
 
-    predictions = pd.DataFrame.from_dict({
-        'person_id': list(all_patients_summary_fact_table_de_id_testing["person_id"]),
-        'outcome_likelihood': preds.tolist()
-    }, orient='columns')
+    # predictions = pd.DataFrame.from_dict({
+    #     'person_id': list(all_patients_summary_fact_table_de_id_testing["person_id"]),
+    #     'outcome_likelihood': preds.tolist()
+    # }, orient='columns')
 
-    return predictions
+    return test_predictions
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.def6f994-533b-46b8-95ab-3708d867119c"),
+    train_test_model=Input(rid="ri.foundry.main.dataset.ea6c836a-9d51-4402-b1b7-0e30fb514fc8")
+)
+def validation_metrics( train_test_model):
+    df = train_test_model
+    print("LR Classification Report:\n{}".format(classification_report(df["outcome"], df["lr_outcome"])))
+    print("RF Classification Report:\n{}".format(classification_report(df["outcome"], df["rf_outcome"])))
+    print("GB Classification Report:\n{}".format(classification_report(df["outcome"], df["gb_outcome"])))
+    print("NN Classification Report:\n{}".format(classification_report(df["outcome"], df["nn_outcome"])))
+    return df
 
