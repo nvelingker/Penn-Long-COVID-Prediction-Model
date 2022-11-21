@@ -1519,7 +1519,7 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     gbc = GradientBoostingClassifier().fit(X_train, y_train)
 
     nn_scaler = StandardScaler().fit(X_train)
-    nnc = MLPClassifier(solver='sgd', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
+    nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
 
     #preds = clf.predict_proba(Testing)[:,1]
 
