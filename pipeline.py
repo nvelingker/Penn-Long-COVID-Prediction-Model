@@ -168,6 +168,9 @@ def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, ev
     #final fill of null in non-continuous variables with 0
     df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
 
+    for col in sorted(df.columns):
+        print(col)
+
     return df
     
 #################################################
@@ -247,19 +250,35 @@ def all_patients_visit_day_facts_table_de_id_testing(everyone_conditions_of_inte
 #################################################
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.2a1d8398-c54a-4732-8f23-073ced750426"),
+    LL_concept_sets_fusion_everyone=Input(rid="ri.foundry.main.dataset.b36c87be-4e43-4f55-a1b2-fc48b0576a77")
+)
+def custom_sets(LL_concept_sets_fusion_everyone):
+    df = LL_concept_sets_fusion_everyone
+    df.loc[len(df.index)] = ['remdesivir ITM', 'REMDESIVIR', 'drug'] 
+    df.loc[len(df.index)] = ['[CVD]Remdesivir', 'REMDESIVIR', 'drug']
+    df.loc[len(df.index)] = ['ventilator', 'VENTILATOR', 'device']
+    df.loc[len(df.index)] = ['anxiety-broad', 'ANXIETY', 'observation,condition']
+    df.loc[len(df.index)] = ['diabetes-broad', 'DIABETESCOMPLICATED', 'condition']
+    print(df)
+    return df
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
     LL_DO_NOT_DELETE_REQUIRED_concept_sets_all=Input(rid="ri.foundry.main.dataset.029aa987-cfef-48fc-bf45-cffd3792cd93"),
-    LL_concept_sets_fusion_everyone=Input(rid="ri.foundry.main.dataset.b36c87be-4e43-4f55-a1b2-fc48b0576a77")
+    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_sets=Input(rid="ri.foundry.main.dataset.2a1d8398-c54a-4732-8f23-073ced750426")
 )
 #The purpose of this node is to optimize the user's experience connecting a customized concept set "fusion sheet" input data frame to replace LL_concept_sets_fusion_everyone.
 
-def customized_concept_set_input(LL_concept_sets_fusion_everyone, LL_DO_NOT_DELETE_REQUIRED_concept_sets_all):
+def customized_concept_set_input( LL_DO_NOT_DELETE_REQUIRED_concept_sets_all, custom_sets, concept_set_members):
     PM_LL_DO_NOT_DELETE_REQUIRED_concept_sets_all = LL_DO_NOT_DELETE_REQUIRED_concept_sets_all
 
     required = LL_DO_NOT_DELETE_REQUIRED_concept_sets_all
-    customizable = LL_concept_sets_fusion_everyone
+    customizable = custom_sets
     
     df = required.join(customizable, on = required.columns, how = 'outer')
+
     
     return df
 
@@ -270,18 +289,17 @@ def customized_concept_set_input(LL_concept_sets_fusion_everyone, LL_DO_NOT_DELE
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
     LL_DO_NOT_DELETE_REQUIRED_concept_sets_all=Input(rid="ri.foundry.main.dataset.029aa987-cfef-48fc-bf45-cffd3792cd93"),
-    LL_concept_sets_fusion_everyone=Input(rid="ri.foundry.main.dataset.b36c87be-4e43-4f55-a1b2-fc48b0576a77")
+    custom_sets=Input(rid="ri.foundry.main.dataset.2a1d8398-c54a-4732-8f23-073ced750426")
 )
 #The purpose of this node is to optimize the user's experience connecting a customized concept set "fusion sheet" input data frame to replace LL_concept_sets_fusion_everyone.
 
-def customized_concept_set_input_testing(LL_concept_sets_fusion_everyone, LL_DO_NOT_DELETE_REQUIRED_concept_sets_all):
+def customized_concept_set_input_testing( LL_DO_NOT_DELETE_REQUIRED_concept_sets_all, custom_sets):
     PM_LL_DO_NOT_DELETE_REQUIRED_concept_sets_all = LL_DO_NOT_DELETE_REQUIRED_concept_sets_all
 
     required = LL_DO_NOT_DELETE_REQUIRED_concept_sets_all
-    customizable = LL_concept_sets_fusion_everyone
+    customizable = custom_sets
     
     df = required.join(customizable, on = required.columns, how = 'outer')
-    
     return df
 
 #################################################
@@ -753,6 +771,7 @@ def everyone_conditions_of_interest(everyone_cohort_de_id, concept_set_members, 
     fusion_df = customized_concept_set_input \
         .filter(customized_concept_set_input.domain.contains('condition')) \
         .select('concept_set_name','indicator_prefix')
+    print(fusion_df)
     #filter concept set members table to only concept ids for the conditions of interest
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
