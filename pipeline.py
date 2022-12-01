@@ -1624,12 +1624,6 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     return test_predictions
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.ac7fced3-8dfe-41fe-abae-3f94a5a220f9")
-)
-def unnamed():
-    
-
-@transform_pandas(
     Output(rid="ri.foundry.main.dataset.def6f994-533b-46b8-95ab-3708d867119c"),
     train_test_model=Input(rid="ri.foundry.main.dataset.ea6c836a-9d51-4402-b1b7-0e30fb514fc8")
 )
