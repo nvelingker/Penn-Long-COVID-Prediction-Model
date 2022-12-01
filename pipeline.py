@@ -2,6 +2,10 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import IntegerType
 
 import pandas as pd
+import sklearn
+import scipy
+import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import mean_squared_error
 from sklearn.ensemble import RandomForestClassifier
@@ -1510,6 +1514,58 @@ def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine
 #################################################
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.a7fb5734-565b-4647-9945-a44ff8ae62db"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7")
+)
+def measurement_analysis_tool(measurement, Long_COVID_Silver_Standard):
+    #specify the measurement concept id, the lower and upper bound (for noise purposes)
+    MCID, LOW, HIGH = 40762499, 60, 100
+    Long_COVID_Silver_Standard = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
+    labels_df = Long_COVID_Silver_Standard.select(F.col("person_id"), F.col("outcome"))
+    measurement = measurement.filter((F.col("measurement_concept_id") == MCID) & F.col("harmonized_value_as_number").between(LOW,HIGH))
+    data = measurement.join(labels_df, "person_id", "outer")
+    data = data.filter(F.col("harmonized_value_as_number").isNotNull()).select(F.col("person_id"), F.col("measurement_date"), F.col("harmonized_value_as_number"), F.col("outcome")).withColumnRenamed("measurement_date","date").withColumnRenamed("harmonized_value_as_number","value")
+    #OPTIONAL aggregation, choose one or both
+    data = data.groupby('person_id','date').agg(F.min('value').alias('value'), F.max('outcome').alias('outcome'))
+    data = data.groupby('person_id').agg(F.avg('value').alias('value'), F.max('outcome').alias('outcome'))
+    data = data.toPandas()
+    zipped = list(zip(data.value,data.outcome))
+    neg = np.asarray([v for v,o in zipped if o==0]).reshape(-1,1)
+    pos = np.asarray([v for v,o in zipped if o==1]).reshape(-1,1)
+    neg = np.hstack((neg,np.zeros(neg.shape)))
+    pos = np.hstack((pos,np.zeros(pos.shape)))
+    model = sklearn.svm.SVC(kernel='linear', C=4)
+    X, y = data['value'].to_numpy().reshape(-1, 1), data['outcome']
+    model.fit(X,y)
+    pred = model.predict(data['value'].to_numpy().reshape(-1, 1))
+    
+    w = model.coef_[0]
+    x_0 = -model.intercept_[0]/w[0]
+    margin = w[0]
+
+    plt.figure()
+    x_min, x_max = LOW, HIGH
+    y_min, y_max = -3, 3
+    yy = np.linspace(y_min, y_max)
+    XX, YY = np.mgrid[x_min:x_max:500j, y_min:y_max:500j]
+    Z = model.predict(np.c_[XX.ravel()]).reshape(XX.shape)
+    plt.pcolormesh(XX, YY, Z, cmap=plt.cm.Paired)
+    plt.plot(x_0*np.ones(shape=yy.shape), yy, 'k-')
+    plt.plot(x_0*np.ones(shape=yy.shape) - margin, yy, 'k--')
+    plt.plot(x_0*np.ones(shape=yy.shape) + margin, yy, 'k--')
+    plt.scatter(pos, np.ones(shape=pos.shape), s=10, marker='o', facecolors='C1')
+    plt.scatter(neg, -1*np.ones(shape=neg.shape), s=10, marker='^', facecolors='C2')
+    plt.xlim(x_min, x_max)
+    plt.ylim(y_min, y_max)
+    plt.show()
+
+    print("SVM Classification Report:\n{}".format(classification_report(data["outcome"], pred)))
+    return data
+
+    
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.ea6c836a-9d51-4402-b1b7-0e30fb514fc8"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
     all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
@@ -1543,6 +1599,7 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     #preds = clf.predict_proba(Testing)[:,1]
 
     lr_test_preds = lrc.predict(X_test)
+    lr2_test_preds = lrc2.predict(X_test)
     rf_test_preds = rfc.predict(X_test)
     gb_test_preds = gbc.predict(X_test)
     nnc_test_preds = nnc.predict(nn_scaler.transform(X_test))
@@ -1551,6 +1608,7 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     test_predictions = pd.DataFrame.from_dict({
         'person_id': list(X_test_no_ind["person_id"]),
         'lr_outcome': lr_test_preds.tolist(),
+        'lr2_outcome': lr2_test_preds.tolist(),
         'rf_outcome': rf_test_preds.tolist(),
         'gb_outcome': gb_test_preds.tolist(),
         'nn_outcome': nnc_test_preds.tolist(),
