@@ -1533,7 +1533,7 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
     X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
 
-    print(f"x_train: {len(X_train}, y_train: {len(y_train)}")
+    print(f"x_train: {len(Training_and_Holdout)}, y_train: {len(Outcome)}")
 
     return Outcome_df
 
