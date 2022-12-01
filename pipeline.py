@@ -14,6 +14,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import classification_report
+import numpy as np
+from matplotlib import pyplot as plt
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
@@ -259,8 +261,6 @@ def all_patients_visit_day_facts_table_de_id_testing(everyone_conditions_of_inte
 )
 def custom_sets(LL_concept_sets_fusion_everyone):
     df = LL_concept_sets_fusion_everyone
-    df.loc[len(df.index)] = ['remdesivir ITM', 'REMDESIVIR', 'drug'] 
-    df.loc[len(df.index)] = ['[CVD]Remdesivir', 'REMDESIVIR', 'drug']
     df.loc[len(df.index)] = ['ventilator', 'VENTILATOR', 'device']
     df.loc[len(df.index)] = ['anxiety-broad', 'ANXIETY', 'observation,condition']
     df.loc[len(df.index)] = ['diabetes-broad', 'DIABETESCOMPLICATED', 'condition']
@@ -1057,7 +1057,7 @@ def everyone_drugs_of_interest_testing(concept_set_members, drug_exposure_testin
 def everyone_measurements_of_interest(measurement, concept_set_members, everyone_cohort_de_id):
     
     #bring in only cohort patient ids
-    persons = everyone_cohort_de_id.select('person_id')
+    persons = everyone_cohort_de_id.select('person_id', 'gender_concept_name')
     #filter procedure occurrence table to only cohort patients    
     df = measurement \
         .select('person_id','measurement_date','measurement_concept_id','harmonized_value_as_number','value_as_concept_id') \
@@ -1116,7 +1116,8 @@ def everyone_measurements_of_interest(measurement, concept_set_members, everyone
     labs_df = df.withColumn('PCR_AG_Pos', F.when(df.measurement_concept_id.isin(pcr_ag_test_ids) & df.value_as_concept_id.isin(covid_positive_measurement_ids), 1).otherwise(0)) \
         .withColumn('PCR_AG_Neg', F.when(df.measurement_concept_id.isin(pcr_ag_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0)) \
         .withColumn('Antibody_Pos', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_positive_measurement_ids), 1).otherwise(0)) \
-        .withColumn('Antibody_Neg', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0))
+        .withColumn('Antibody_Neg', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0)) \
+        .withColumn('SEX', F.when(F.col('gender_concept_name') == 'FEMALE', 1).otherwise(0))
      
     #collapse all reasonable values to unique person and visit rows
     BMI_df = BMI_df.groupby('person_id', 'visit_date').agg(
@@ -1127,7 +1128,8 @@ def everyone_measurements_of_interest(measurement, concept_set_members, everyone
     F.max('PCR_AG_Pos').alias('PCR_AG_Pos'),
     F.max('PCR_AG_Neg').alias('PCR_AG_Neg'),
     F.max('Antibody_Pos').alias('Antibody_Pos'),
-    F.max('Antibody_Neg').alias('Antibody_Neg'))
+    F.max('Antibody_Neg').alias('Antibody_Neg'),
+    F.max('SEX').alias('SEX'))
 
     #add a calculated BMI for each visit date when height and weight available.  Note that if only one is available, it will result in zero
     #subsequent filter out rows that would have resulted from unreasonable calculated_BMI being used as best_BMI for the visit 
@@ -1140,7 +1142,7 @@ def everyone_measurements_of_interest(measurement, concept_set_members, everyone
     BMI_df = BMI_df.withColumn('OBESITY', F.when(BMI_df.BMI_rounded>=30, 1).otherwise(0))
 
     #join BMI_df with labs_df to retain all lab results with only reasonable BMI_rounded and OBESITY flags
-    df = labs_df.join(BMI_df, on=['person_id', 'visit_date'], how='left') 
+    df = labs_df.join(BMI_df, on=['person_id', 'visit_date'], how='left')
 
     return df
 
@@ -1160,10 +1162,9 @@ def everyone_measurements_of_interest(measurement, concept_set_members, everyone
 #Description - This node filters the measurements table for rows that have a measurement_concept_id associated with one of the concept sets described in the data dictionary in the README.  Indicator names for a positive COVID PCR or AG test, negative COVID PCR or AG test, positive COVID antibody test, and negative COVID antibody test are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date. It also finds the harmonized value as a number for BMI measurements and collapses these values to unique instances on the basis of patient and visit date.  Measurement BMI cutoffs included are intended for adults. Analyses focused on pediatric measurements should use different bounds for BMI measurements. 
 
 def everyone_measurements_of_interest_testing(measurement_testing, concept_set_members, everyone_cohort_de_id_testing):
-    everyone_cohort_de_id = everyone_cohort_de_id_testing
     
     #bring in only cohort patient ids
-    persons = everyone_cohort_de_id_testing.select('person_id')
+    persons = everyone_cohort_de_id_testing.select('person_id', 'gender_concept_name')
     #filter procedure occurrence table to only cohort patients    
     df = measurement_testing \
         .select('person_id','measurement_date','measurement_concept_id','harmonized_value_as_number','value_as_concept_id') \
@@ -1222,7 +1223,8 @@ def everyone_measurements_of_interest_testing(measurement_testing, concept_set_m
     labs_df = df.withColumn('PCR_AG_Pos', F.when(df.measurement_concept_id.isin(pcr_ag_test_ids) & df.value_as_concept_id.isin(covid_positive_measurement_ids), 1).otherwise(0)) \
         .withColumn('PCR_AG_Neg', F.when(df.measurement_concept_id.isin(pcr_ag_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0)) \
         .withColumn('Antibody_Pos', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_positive_measurement_ids), 1).otherwise(0)) \
-        .withColumn('Antibody_Neg', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0))
+        .withColumn('Antibody_Neg', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0)) \
+        .withColumn('SEX', F.when(F.col('gender_concept_name') == 'FEMALE', 1).otherwise(0))
      
     #collapse all reasonable values to unique person and visit rows
     BMI_df = BMI_df.groupby('person_id', 'visit_date').agg(
@@ -1233,7 +1235,8 @@ def everyone_measurements_of_interest_testing(measurement_testing, concept_set_m
     F.max('PCR_AG_Pos').alias('PCR_AG_Pos'),
     F.max('PCR_AG_Neg').alias('PCR_AG_Neg'),
     F.max('Antibody_Pos').alias('Antibody_Pos'),
-    F.max('Antibody_Neg').alias('Antibody_Neg'))
+    F.max('Antibody_Neg').alias('Antibody_Neg'),
+    F.max('SEX').alias('SEX'))
 
     #add a calculated BMI for each visit date when height and weight available.  Note that if only one is available, it will result in zero
     #subsequent filter out rows that would have resulted from unreasonable calculated_BMI being used as best_BMI for the visit 
@@ -1246,7 +1249,7 @@ def everyone_measurements_of_interest_testing(measurement_testing, concept_set_m
     BMI_df = BMI_df.withColumn('OBESITY', F.when(BMI_df.BMI_rounded>=30, 1).otherwise(0))
 
     #join BMI_df with labs_df to retain all lab results with only reasonable BMI_rounded and OBESITY flags
-    df = labs_df.join(BMI_df, on=['person_id', 'visit_date'], how='left') 
+    df = labs_df.join(BMI_df, on=['person_id', 'visit_date'], how='left')
 
     return df
 
@@ -1447,6 +1450,12 @@ def everyone_vaccines_of_interest(everyone_cohort_de_id, Vaccine_fact_de_identif
     persons = everyone_cohort_de_id.select('person_id')
     vax_df = Vaccine_fact_de_identified.select('person_id', '1_vax_date', '2_vax_date', '3_vax_date', '4_vax_date') \
         .join(persons, 'person_id', 'inner')
+    vax_switch = Vaccine_fact_de_identified.select('person_id', 'date_1_vax', '1_vax_type', 'date_diff_1_2') \
+        .withColumnRenamed('date_diff_1_2', 'DATE_DIFF_1_2') \
+        .withColumn("1_VAX_JJ", F.when(F.col('1_vax_type') == 'janssen', 1).otherwise(0)) \
+        .withColumn("1_VAX_PFIZER", F.when(F.col('1_vax_type') == 'pfizer', 1).otherwise(0)) \
+        .withColumn("1_VAX_MODERNA", F.when(F.col('1_vax_type') == 'moderna', 1).otherwise(0)) \
+        .drop(F.col('1_vax_type'))
 
     first_dose = vax_df.select('person_id', '1_vax_date') \
         .withColumnRenamed('1_vax_date', 'visit_date') \
@@ -1464,6 +1473,7 @@ def everyone_vaccines_of_interest(everyone_cohort_de_id, Vaccine_fact_de_identif
     df = first_dose.join(second_dose, on=['person_id', 'visit_date'], how='outer') \
         .join(third_dose, on=['person_id', 'visit_date'], how='outer') \
         .join(fourth_dose, on=['person_id', 'visit_date'], how='outer') \
+        .join(vax_switch, on=['person_id'], how='inner') \
         .distinct()
 
     df = df.withColumn('had_vaccine_administered', F.lit(1))
@@ -1486,6 +1496,12 @@ def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine
     persons = everyone_cohort_de_id_testing.select('person_id')
     vax_df = Vaccine_fact_de_identified_testing.select('person_id', '1_vax_date', '2_vax_date', '3_vax_date', '4_vax_date') \
         .join(persons, 'person_id', 'inner')
+    vax_switch = Vaccine_fact_de_identified.select('person_id', 'date_1_vax', '1_vax_type', 'date_diff_1_2') \
+        .withColumnRenamed('date_diff_1_2', 'DATE_DIFF_1_2') \
+        .withColumn("1_VAX_JJ", F.when(F.col('1_vax_type') == 'janssen', 1).otherwise(0)) \
+        .withColumn("1_VAX_PFIZER", F.when(F.col('1_vax_type') == 'pfizer', 1).otherwise(0)) \
+        .withColumn("1_VAX_MODERNA", F.when(F.col('1_vax_type') == 'moderna', 1).otherwise(0)) \
+        .drop(F.col('1_vax_type'))
 
     first_dose = vax_df.select('person_id', '1_vax_date') \
         .withColumnRenamed('1_vax_date', 'visit_date') \
@@ -1503,6 +1519,7 @@ def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine
     df = first_dose.join(second_dose, on=['person_id', 'visit_date'], how='outer') \
         .join(third_dose, on=['person_id', 'visit_date'], how='outer') \
         .join(fourth_dose, on=['person_id', 'visit_date'], how='outer') \
+        .join(vax_switch, on=['person_id'], how='inner') \
         .distinct()
 
     df = df.withColumn('had_vaccine_administered', F.lit(1))
@@ -1589,9 +1606,19 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
     X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
 
-    lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
+    lrc = LogisticRegression(penalty='l1', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
     rfc = RandomForestClassifier().fit(X_train, y_train)
     gbc = GradientBoostingClassifier().fit(X_train, y_train)
+
+    lrc_sort_features = np.argsort(lrc.coef_.flatten())[-20:]
+    rfc_sort_features = np.argsort(rfc.feature_importances_.flatten())[-20:]
+    plt.bar(np.arange(20), rfc.feature_importances_.flatten()[rfc_sort_features])
+    plt.xticks(np.arange(20), [cols[1:][i] for i in rfc_sort_features], rotation='vertical')
+    plt.tight_layout()
+    plt.show()
+
+    print("lrc important features:", [cols[1:][int(i)] for i in lrc_sort_features])
+    print("rfc important features:", [cols[1:][int(i)] for i in rfc_sort_features])
 
     nn_scaler = StandardScaler().fit(X_train)
     nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
