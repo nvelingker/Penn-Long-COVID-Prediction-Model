@@ -1533,6 +1533,10 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
     X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
 
+    print(f"x_train: {X_train.size}, y_train: {y_train.size})
+
+    return Outcome_df
+
     lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
     rfc = RandomForestClassifier().fit(X_train, y_train)
     gbc = GradientBoostingClassifier().fit(X_train, y_train)
