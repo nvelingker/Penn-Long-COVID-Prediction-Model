@@ -1,5 +1,6 @@
 from pyspark.sql import functions as F
 from pyspark.sql.types import IntegerType
+from pyspark.sql import Window
 
 import pandas as pd
 import sklearn
@@ -149,7 +150,7 @@ def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, ev
     df = df.join(observations_df, on=list(set(df.columns)&set(observations_df.columns)), how='outer')
     df = df.join(conditions_df, on=list(set(df.columns)&set(conditions_df.columns)), how='outer')
     df = df.join(drugs_df, on=list(set(df.columns)&set(drugs_df.columns)), how='outer')
-    df = df.join(measurements_df, on=list(set(df.columns)&set(measurements_df.columns)), how='outer')    
+    df = df.join(measurements_df, on=list(set(df.columns)&set(measurements_df.columns)), how='outer')
     
     df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
    
@@ -224,7 +225,7 @@ def all_patients_visit_day_facts_table_de_id_testing(everyone_conditions_of_inte
     df = df.join(observations_df, on=list(set(df.columns)&set(observations_df.columns)), how='outer')
     df = df.join(conditions_df, on=list(set(df.columns)&set(conditions_df.columns)), how='outer')
     df = df.join(drugs_df, on=list(set(df.columns)&set(drugs_df.columns)), how='outer')
-    df = df.join(measurements_df, on=list(set(df.columns)&set(measurements_df.columns)), how='outer')    
+    df = df.join(measurements_df, on=list(set(df.columns)&set(measurements_df.columns)), how='outer')
     
     df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
    
@@ -952,14 +953,15 @@ def everyone_devices_of_interest_testing(device_exposure_testing, everyone_cohor
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
     customized_concept_set_input=Input(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
     drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
-    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf")
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
+    first_covid_positive=Input(rid="ri.vector.main.execute.5fe4fba8-de72-489d-8a93-4e3398220f66")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_drugs_of_interest(concept_set_members, drug_exposure, everyone_cohort_de_id, customized_concept_set_input):
+def everyone_drugs_of_interest(concept_set_members, drug_exposure, everyone_cohort_de_id, customized_concept_set_input, first_covid_positive):
   
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
@@ -985,7 +987,10 @@ def everyone_drugs_of_interest(concept_set_members, drug_exposure, everyone_coho
     #find drug exposure information based on matching concept ids for drugs of interest
     df = drug_df.join(concepts_df, 'concept_id', 'inner')
     #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for drugs of interest
-    df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
+    df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0) \
+        .join(first_covid_positive, 'person_id', 'leftouter') \
+        .withColumn('BEFORE_FCP', F.when(F.datediff(F.col('visit_date'), F.col('first_covid_positive')) < 0, 1).otherwise(0)) \
+        .drop(F.col('first_covid_positive'))
 
     return df
     
@@ -999,14 +1004,15 @@ def everyone_drugs_of_interest(concept_set_members, drug_exposure, everyone_coho
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
     customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
     drug_exposure_testing=Input(rid="ri.foundry.main.dataset.26a51cab-0279-45a6-bbc0-f44a12b52f9c"),
-    everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4")
+    everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
+    first_covid_positive_testing=Input(rid="ri.vector.main.execute.9c7ebde3-44ed-4e96-85e3-010f458651be")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_drugs_of_interest_testing(concept_set_members, drug_exposure_testing, everyone_cohort_de_id_testing, customized_concept_set_input_testing):
+def everyone_drugs_of_interest_testing(concept_set_members, drug_exposure_testing, everyone_cohort_de_id_testing, customized_concept_set_input_testing, first_covid_positive_testing):
     everyone_cohort_de_id = everyone_cohort_de_id_testing
     customized_concept_set_input = customized_concept_set_input_testing
   
@@ -1034,7 +1040,10 @@ def everyone_drugs_of_interest_testing(concept_set_members, drug_exposure_testin
     #find drug exposure information based on matching concept ids for drugs of interest
     df = drug_df.join(concepts_df, 'concept_id', 'right')
     #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for drugs of interest
-    df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
+    df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0) \
+        .join(first_covid_positive_testing, 'person_id', 'leftouter') \
+        .withColumn('BEFORE_FCP', F.when(F.datediff(F.col('visit_date'), F.col('first_covid_positive')) < 0, 1).otherwise(0)) \
+        .drop(F.col('first_covid_positive'))
 
     return df
     
@@ -1442,15 +1451,17 @@ def everyone_procedures_of_interest_testing(everyone_cohort_de_id_testing, conce
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.202ec093-e569-4af8-897a-ab8d2c4325c0"),
     Vaccine_fact_de_identified=Input(rid="ri.vector.main.execute.7641dae2-3118-4a2c-8a89-e4f646cbf18f"),
-    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf")
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
+    first_covid_positive=Input(rid="ri.vector.main.execute.5fe4fba8-de72-489d-8a93-4e3398220f66")
 )
-def everyone_vaccines_of_interest(everyone_cohort_de_id, Vaccine_fact_de_identified):
+def everyone_vaccines_of_interest(everyone_cohort_de_id, Vaccine_fact_de_identified, first_covid_positive):
     vaccine_fact_de_identified = Vaccine_fact_de_identified
     
     persons = everyone_cohort_de_id.select('person_id')
-    vax_df = Vaccine_fact_de_identified.select('person_id', '1_vax_date', '2_vax_date', '3_vax_date', '4_vax_date') \
+    vax_df = Vaccine_fact_de_identified.select('person_id', 'vaccine_txn', '1_vax_date', '2_vax_date', '3_vax_date', '4_vax_date') \
         .join(persons, 'person_id', 'inner')
-    vax_switch = Vaccine_fact_de_identified.select('person_id', 'date_1_vax', '1_vax_type', 'date_diff_1_2') \
+        
+    vax_switch = Vaccine_fact_de_identified.select('person_id', '1_vax_type', 'date_diff_1_2') \
         .withColumnRenamed('date_diff_1_2', 'DATE_DIFF_1_2') \
         .withColumn("1_VAX_JJ", F.when(F.col('1_vax_type') == 'janssen', 1).otherwise(0)) \
         .withColumn("1_VAX_PFIZER", F.when(F.col('1_vax_type') == 'pfizer', 1).otherwise(0)) \
@@ -1459,15 +1470,19 @@ def everyone_vaccines_of_interest(everyone_cohort_de_id, Vaccine_fact_de_identif
 
     first_dose = vax_df.select('person_id', '1_vax_date') \
         .withColumnRenamed('1_vax_date', 'visit_date') \
+        .withColumn('1_vax_dose', F.lit(1)) \
         .where(F.col('visit_date').isNotNull())
     second_dose = vax_df.select('person_id', '2_vax_date') \
         .withColumnRenamed('2_vax_date', 'visit_date') \
+        .withColumn('2_vax_dose', F.lit(1)) \
         .where(F.col('visit_date').isNotNull())        
     third_dose = vax_df.select('person_id', '3_vax_date') \
         .withColumnRenamed('3_vax_date', 'visit_date') \
+        .withColumn('3_vax_dose', F.lit(1)) \
         .where(F.col('visit_date').isNotNull())
     fourth_dose = vax_df.select('person_id', '4_vax_date') \
         .withColumnRenamed('4_vax_date', 'visit_date') \
+        .withColumn('4_vax_dose', F.lit(1)) \
         .where(F.col('visit_date').isNotNull())
 
     df = first_dose.join(second_dose, on=['person_id', 'visit_date'], how='outer') \
@@ -1476,7 +1491,10 @@ def everyone_vaccines_of_interest(everyone_cohort_de_id, Vaccine_fact_de_identif
         .join(vax_switch, on=['person_id'], how='inner') \
         .distinct()
 
-    df = df.withColumn('had_vaccine_administered', F.lit(1))
+    df = df.withColumn('had_vaccine_administered', F.lit(1)) \
+        .join(first_covid_positive, 'person_id', 'leftouter') \
+        .withColumn('vax_before_FCP', F.when(F.datediff(F.col('visit_date'), F.col('first_covid_positive')) < 0, 1).otherwise(0)) \
+        .drop(F.col('first_covid_positive'))
 
     return df
 
@@ -1487,16 +1505,18 @@ def everyone_vaccines_of_interest(everyone_cohort_de_id, Vaccine_fact_de_identif
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.97cdf176-e012-49e9-8eff-6667e5f67e1a"),
     Vaccine_fact_de_identified_testing=Input(rid="ri.foundry.main.dataset.9392c81b-bbbf-4e66-a366-a2e7e4f9db7b"),
-    everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4")
+    everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
+    first_covid_positive_testing=Input(rid="ri.vector.main.execute.9c7ebde3-44ed-4e96-85e3-010f458651be")
 )
-def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine_fact_de_identified_testing):
+def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine_fact_de_identified_testing, first_covid_positive_testing):
     everyone_cohort_de_id = everyone_cohort_de_id_testing
     vaccine_fact_de_identified = Vaccine_fact_de_identified_testing
     
     persons = everyone_cohort_de_id_testing.select('person_id')
-    vax_df = Vaccine_fact_de_identified_testing.select('person_id', '1_vax_date', '2_vax_date', '3_vax_date', '4_vax_date') \
+    vax_df = Vaccine_fact_de_identified_testing.select('person_id', 'vaccine_txn', '1_vax_date', '2_vax_date', '3_vax_date', '4_vax_date') \
         .join(persons, 'person_id', 'inner')
-    vax_switch = Vaccine_fact_de_identified.select('person_id', 'date_1_vax', '1_vax_type', 'date_diff_1_2') \
+        
+    vax_switch = Vaccine_fact_de_identified.select('person_id', '1_vax_type', 'date_diff_1_2') \
         .withColumnRenamed('date_diff_1_2', 'DATE_DIFF_1_2') \
         .withColumn("1_VAX_JJ", F.when(F.col('1_vax_type') == 'janssen', 1).otherwise(0)) \
         .withColumn("1_VAX_PFIZER", F.when(F.col('1_vax_type') == 'pfizer', 1).otherwise(0)) \
@@ -1522,13 +1542,40 @@ def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine
         .join(vax_switch, on=['person_id'], how='inner') \
         .distinct()
 
-    df = df.withColumn('had_vaccine_administered', F.lit(1))
+    df = df.withColumn('had_vaccine_administered', F.lit(1)) \
+        .join(first_covid_positive_testing, 'person_id', 'leftouter') \
+        .withColumn('vax_before_FCP', F.when(F.datediff(F.col('visit_date'), F.col('first_covid_positive')) < 0, 1).otherwise(0)) \
+        .drop(F.col('first_covid_positive'))
 
     return df
 
 #################################################
 ## Global imports and functions included below ##
 #################################################
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.5fe4fba8-de72-489d-8a93-4e3398220f66"),
+    everyone_conditions_of_interest=Input(rid="ri.foundry.main.dataset.514f3fe8-7565-4701-8982-174b43937006")
+)
+def first_covid_positive(everyone_conditions_of_interest):
+    w = Window.partitionBy('person_id').orderBy(F.asc('visit_date'))
+    df = everyone_conditions_of_interest \
+        .filter(F.col('LL_COVID_diagnosis') == 1) \
+        .select('person_id', F.first('visit_date').over(w).alias('first_covid_positive')) \
+        .distinct()
+
+    return df
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.9c7ebde3-44ed-4e96-85e3-010f458651be"),
+    everyone_conditions_of_interest_testing=Input(rid="ri.foundry.main.dataset.ae4f0220-6939-4f61-a97a-ff78d29df156")
+)
+def first_covid_positive_testing(everyone_conditions_of_interest_testing):
+    w = Window.partitionBy('person_id').orderBy(F.asc('visit_date'))
+    df = everyone_conditions_of_interest_testing \
+        .filter(F.col('LL_COVID_diagnosis') == 1) \
+        .select('person_id', F.first('visit_date').over(w).alias('first_covid_positive')) \
+        .distinct()
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.a7fb5734-565b-4647-9945-a44ff8ae62db"),
@@ -1606,7 +1653,8 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
     X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
 
-    lrc = LogisticRegression(penalty='l1', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
+    lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
+    lrc2 = LogisticRegression(penalty='l2', class_weight='balanced', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
     rfc = RandomForestClassifier().fit(X_train, y_train)
     gbc = GradientBoostingClassifier().fit(X_train, y_train)
 
@@ -1657,6 +1705,7 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
 def validation_metrics( train_test_model):
     df = train_test_model
     print("LR Classification Report:\n{}".format(classification_report(df["outcome"], df["lr_outcome"])))
+    print("LR2 Classification Report:\n{}".format(classification_report(df["outcome"], df["lr2_outcome"])))
     print("RF Classification Report:\n{}".format(classification_report(df["outcome"], df["rf_outcome"])))
     print("GB Classification Report:\n{}".format(classification_report(df["outcome"], df["gb_outcome"])))
     print("NN Classification Report:\n{}".format(classification_report(df["outcome"], df["nn_outcome"])))
