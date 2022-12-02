@@ -18,6 +18,180 @@ from sklearn.metrics import classification_report
 import numpy as np
 from matplotlib import pyplot as plt
 
+import torch
+
+# Set default dtype
+torch.set_default_dtype(torch.float32)
+
+# Evaluation Label Setups
+LABEL_SETUPS = [
+    "prior", # Only take `pasc_code_prior_four_weeks` as label
+    "after", # Only take `pasc_code_after_four_weeks` as label
+    "both", # Take the `or` of both `pasc_code_prior_four_weeks` and `pasc_code_after_four_weeks` as label
+]
+
+# Visits Dataset for sequential
+class LongCOVIDVisitsDataset(torch.utils.data.Dataset):
+    def __init__(self, person_id, person_info, recent_visit, label, setup="both"):
+        self.person_ids = person_id
+        self.person_info = person_info.set_index("person_id")
+        self.recent_visit = recent_visit.set_index(["person_id", "visit_date"])
+        self.label = label.set_index("person_id")
+        self.setup = setup
+
+        assert len(self.person_ids) == len(self.label)
+        assert len(self.person_info) == len(self.label)
+
+    def __len__(self):
+        return len(self.person_info)
+
+    def __getitem__(self, idx):
+        person_id = self.person_ids.iloc[idx]["person_id"]
+
+        # Encode person_info into vector
+        person_info = self.person_info.loc[person_id]
+        person_info_tensor = torch.tensor([
+            person_info["normalized_age"], 
+            person_info["is_male"], 
+            person_info["is_female"], 
+            person_info["is_other_gender"]
+        ])
+
+        # Encode each visit into vector
+        visits = self.recent_visit.loc[person_id]
+        visit_tensors = []
+        for i in range(len(visits)):
+            visit = visits.iloc[i]
+            visit_tensor = torch.tensor([visit["diff_date"] / 180] + list(visit[5:]))
+            visit_tensors.append(visit_tensor)
+        visits_tensor = torch.stack(visit_tensors)
+
+        # Obtain the label
+        label_row = self.label.loc[person_id]
+        if self.setup == "prior":
+            label_tensor = torch.tensor(label_row["pasc_code_prior_four_weeks"])
+        elif self.setup == "after":
+            label_tensor = torch.tensor(label_row["pasc_code_after_four_weeks"])
+        elif self.setup == "both":
+            label_tensor = torch.tensor(max(label_row["pasc_code_after_four_weeks"], label_row["pasc_code_prior_four_weeks"]))
+        else:
+            raise Exception(f"Unknown setup `{self.setup}`")
+
+        return ((person_info_tensor, visits_tensor), label_tensor)
+
+    @staticmethod
+    def collate_fn(data):
+        batched_person_info_tensor = torch.stack([person_info for ((person_info, _), _) in data]).to(dtype=torch.float32)
+        batched_visits_tensor = torch.nn.utils.rnn.pad_sequence([visits for ((_, visits), _) in data]).to(dtype=torch.float32)
+        batched_label_tensor = torch.stack([label for (_, label) in data]).to(dtype=torch.float32)
+        return ((batched_person_info_tensor, batched_visits_tensor), batched_label_tensor)
+
+class LongCOVIDVisitsLSTMModel(torch.nn.Module):
+    def __init__(
+        self, 
+        person_info_dim=4,
+        visit_dim=72,
+        latent_dim=128, 
+        encoder_num_layers=1,
+        decoder_num_layers=1,
+    ):
+        super(LongCOVIDVisitsLSTMModel, self).__init__()
+
+        # Configurations
+        self.person_info_dim = person_info_dim
+        self.visit_dim = visit_dim
+        self.latent_dim = latent_dim
+        self.encoder_num_layers = encoder_num_layers
+        self.decoder_num_layers = decoder_num_layers
+
+        # Person info encoder
+        encoder_layers = [torch.nn.Linear(self.person_info_dim, self.latent_dim).to(dtype=torch.float32)]
+        for _ in range(encoder_num_layers):
+            encoder_layers += [torch.nn.ReLU(), torch.nn.Linear(self.latent_dim, self.latent_dim)]
+        self.person_info_encoder = torch.nn.Sequential(*encoder_layers).to(dtype=torch.float32)
+
+        # Visits encoder
+        self.rnn = torch.nn.LSTM(self.visit_dim, self.latent_dim, 1).to(dtype=torch.float32)
+        self.rnn_c0 = torch.nn.Embedding(1, self.latent_dim).to(dtype=torch.float32)
+
+        # Final predictor
+        predictor_layers = []
+        for _ in range(self.decoder_num_layers):
+            predictor_layers += [torch.nn.Linear(self.latent_dim, self.latent_dim), torch.nn.ReLU()]
+        predictor_layers += [torch.nn.Linear(self.latent_dim, 1), torch.nn.Sigmoid()]
+        self.predictor = torch.nn.Sequential(*predictor_layers).to(dtype=torch.float32)
+
+    def forward(self, person_info, visits):
+        batch_size, _ = person_info.shape
+        h0 = self.person_info_encoder(person_info).view(1, batch_size, -1)
+        c0 = self.rnn_c0(torch.tensor([0] * batch_size, dtype=torch.long)).view(1, batch_size, -1)
+        _, (hn, cn) = self.rnn(visits, (h0, c0))
+        y_pred = self.predictor(cn).view(batch_size)
+        return y_pred
+
+class Trainer:
+    def __init__(self, train_loader, test_loader, model, lr=0.0001, num_epochs=5):
+        self.train_loader = train_loader
+        self.test_loader = test_loader
+        self.model = model
+        self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        self.loss_fn = torch.nn.MSELoss()
+        self.num_epochs = num_epochs
+
+    def train_epoch(self, epoch):
+        self.model.train()
+        total_loss = 0
+        num_batches = 0
+        for (x, y) in self.train_loader:
+            self.optimizer.zero_grad()
+            y_pred = self.model(*x)
+            loss = self.loss_fn(y_pred, y)
+            total_loss += loss.item()
+            num_batches += 1
+            loss.backward()
+            self.optimizer.step()
+        print(f"[Train epoch {epoch}] Avg Loss: {total_loss / num_batches}")
+            
+    def test_epoch(self, epoch):
+        self.model.eval()
+        num_items = len(self.test_loader.dataset)
+        total_loss = 0
+        num_batches = 0
+        num_correct = 0
+        num_total = 0
+        num_tp, num_fp, num_tn, num_fn = 0, 0, 0, 0
+
+        for (x, y) in self.test_loader:
+            y_pred = self.model(*x)
+            loss = self.loss_fn(y_pred, y)
+            total_loss += loss.item()
+            num_batches += 1
+            batch_size = len(y)
+            for i in range(batch_size):
+                gt = y[i].item()
+                pred = 1 if y_pred[i].item() > 0.5 else 0
+                correct = gt == pred
+                if correct: num_correct += 1
+                if gt == 1 and pred == 1: num_tp += 1
+                if gt == 1 and pred == 0: num_fn += 1
+                if gt == 0 and pred == 1: num_fp += 1
+                if gt == 0 and pred == 0: num_tn += 1
+                num_total += 1
+
+        precision = num_tp / (num_tp + num_fp)
+        recall = num_tp / (num_tp + num_fn)
+
+        print(f"[Test epoch {epoch}] Avg Loss: {total_loss / num_batches}, Accuracy: {num_correct / num_total}, Precision: {precision}, Recall: {recall}")
+
+    def train(self):
+        self.test_epoch(0)
+        for epoch in range(1, self.num_epochs + 1):
+            self.train_epoch(epoch)
+            self.test_epoch(epoch)
+        return self.model
+
+            
+
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
     all_patients_visit_day_facts_table_de_id=Input(rid="ri.foundry.main.dataset.ace57213-685a-4f18-a157-2b02b41086be"),
@@ -1690,6 +1864,153 @@ def measurement_analysis_tool(measurement, Long_COVID_Silver_Standard):
     
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.d39564f3-817f-4b8a-a8b6-81d4f8fd6bf1"),
+    recent_visits=Input(rid="ri.foundry.main.dataset.d42a9b47-a06f-4d43-b113-7414a1bdb9b6")
+)
+def num_recent_visits(recent_visits):
+
+    # Find how many recent visits are there
+    df = recent_visits \
+        .groupby('person_id')['visit_date'] \
+        .nunique() \
+        .reset_index() \
+        .rename(columns={"visit_date": "num_recent_visits"})
+
+    return df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.2f6ebf73-3a2d-43dc-ace9-da56da4b1743"),
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf")
+)
+def person_information(everyone_cohort_de_id):
+    df = everyone_cohort_de_id
+
+    # First add normalized age
+    min_age = df["age"].min()
+    max_age = df["age"].max()
+    diff = max_age - min_age
+    df["normalized_age"] = df["age"].map(lambda a: (a - min_age) / diff).fillna(0.0)
+
+    # Then add gender information
+    df["is_male"] = df["gender_concept_name"].map(lambda g: 1 if g == "MALE" else 0)
+    df["is_female"] = df["gender_concept_name"].map(lambda g: 1 if g == "FEMALE" else 0)
+    df["is_other_gender"] = df["gender_concept_name"].map(lambda g: 1 if g != "FEMALE" and g != "MALE" else 0)
+
+    # Only include necessary feature
+    df = df[["person_id", "age", "normalized_age", "is_male", "is_female", "is_other_gender"]]
+
+    # Return
+    return df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.d42a9b47-a06f-4d43-b113-7414a1bdb9b6"),
+    all_patients_visit_day_facts_table_de_id=Input(rid="ri.foundry.main.dataset.ace57213-685a-4f18-a157-2b02b41086be")
+)
+def recent_visits(all_patients_visit_day_facts_table_de_id):
+    # First sort the visits
+    all_patients_visit_day_facts_table_de_id = all_patients_visit_day_facts_table_de_id.sort_values(["person_id", "visit_date"])
+
+    # Get the number of visits
+    # num_visits = all_patients_visit_day_facts_table_de_id \
+    #     .groupby('person_id')['visit_date'] \
+    #     .nunique() \
+    #     .reset_index() \
+    #     .rename(columns={"visit_date": "num_visits"})
+
+    # The maximum number of visits is around 1000
+    # print(num_visits.max())
+
+    # Get the last visit of each patient
+    last_visit = all_patients_visit_day_facts_table_de_id \
+        .groupby("person_id")["visit_date"] \
+        .max() \
+        .reset_index("person_id") \
+        .rename(columns={"visit_date": "last_visit_date"})
+    
+    # Add a six-month before the last visit column to the dataframe
+    last_visit["six_month_before_last_visit"] = last_visit["last_visit_date"].map(lambda x: x - pd.Timedelta(days=180))
+
+    # Merge last_visit back
+    df = all_patients_visit_day_facts_table_de_id.merge(last_visit, on="person_id", how="left")
+
+    # Find "recent visits" for each patient that are within six-month before their final visit
+    mask = df["visit_date"] > df["six_month_before_last_visit"]
+    recent_visits = df.loc[mask]
+
+    # Add diff_date feature: how many days have passed from the previous visit?
+    recent_visits["diff_date"] = recent_visits.groupby("person_id")["visit_date"].diff().fillna(0).map(lambda x: x if type(x) == int else x.days)
+
+    # Rearrange columns
+    cols = recent_visits.columns.tolist()
+    cols = cols[0:2] + cols[-3:] + cols[2:-3]
+    recent_visits = recent_visits[cols]
+
+    # The maximum difference is 179
+    # max_diff_date = recent_visits["diff_date"].max()
+    # print(max_diff_date)
+
+    # Make sure the data is sorted
+    recent_visits = recent_visits.sort_values(["person_id", "visit_date"]).fillna(0)
+
+    return recent_visits
+    
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.f3ea4ea5-6240-4bd5-a633-b5ea0628226e"),
+    person_nlp_symptom=Input(rid="ri.foundry.main.dataset.48a30545-e47e-4ec1-8811-2f15ba55b045"),
+    recent_visits=Input(rid="ri.foundry.main.dataset.d42a9b47-a06f-4d43-b113-7414a1bdb9b6")
+)
+def recent_visits_w_nlp_notes(recent_visits, person_nlp_symptom):
+    person_nlp_symptom = person_nlp_symptom.merge(recent_visits[["person_id", "six_month_before_last_visit"]].drop_duplicates(), on="person_id", how="left")
+    person_nlp_symptom = person_nlp_symptom.loc[person_nlp_symptom["note_date"] >= person_nlp_symptom["six_month_before_last_visit"]]
+    person_nlp_symptom = person_nlp_symptom.rename(columns={"note_date": "visit_date"}).drop(columns=["six_month_before_last_visit", "note_id", "visit_occurrence_id"])
+    person_nlp_symptom["has_nlp_note"] = 1.0
+
+    # Make sure type checks
+    df = recent_visits.merge(person_nlp_symptom, on=["person_id", "visit_date"], how="left").sort_values(["person_id", "visit_date"]).fillna(0.0)
+
+    return df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.e870e250-353c-4263-add9-98ce1858f0c6"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    person_information=Input(rid="ri.foundry.main.dataset.2f6ebf73-3a2d-43dc-ace9-da56da4b1743"),
+    recent_visits_w_nlp_notes=Input(rid="ri.foundry.main.dataset.f3ea4ea5-6240-4bd5-a633-b5ea0628226e"),
+    train_valid_split=Input(rid="ri.foundry.main.dataset.9d1a79f6-7627-4ee4-abc0-d6d6179c2f26")
+)
+def train_sequential_model(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes):
+    # First get the splitted person ids
+    train_person_ids = train_valid_split.loc[train_valid_split["split"] == "train"]
+    valid_person_ids = train_valid_split.loc[train_valid_split["split"] == "valid"]
+
+    # Use it to split the data into training x/y and validation x/y
+    train_recent_visits = train_person_ids.merge(recent_visits_w_nlp_notes, on="person_id")
+    valid_recent_visits = valid_person_ids.merge(recent_visits_w_nlp_notes, on="person_id")
+    train_labels = train_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+    valid_labels = valid_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+
+    # Basic person information
+    train_person_info = train_person_ids.merge(person_information, on="person_id")
+    valid_person_info = valid_person_ids.merge(person_information, on="person_id")
+
+    # Construct the two datasets
+    train_dataset = LongCOVIDVisitsDataset(train_person_ids, train_person_info, train_recent_visits, train_labels)
+    valid_dataset = LongCOVIDVisitsDataset(valid_person_ids, valid_person_info, valid_recent_visits, valid_labels)
+
+    # Construct dataloaders
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=16, shuffle=True, collate_fn=LongCOVIDVisitsDataset.collate_fn)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=16, shuffle=True, collate_fn=LongCOVIDVisitsDataset.collate_fn)
+
+    # Construct model
+    model = LongCOVIDVisitsLSTMModel()
+
+    # Training loop
+    trainer = Trainer(train_loader, valid_loader, model)
+    result_model = trainer.train()
+
+    return train_person_ids
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.ea6c836a-9d51-4402-b1b7-0e30fb514fc8"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
     all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
@@ -1757,6 +2078,27 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     # }, orient='columns')
 
     return test_predictions
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.9d1a79f6-7627-4ee4-abc0-d6d6179c2f26"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    num_recent_visits=Input(rid="ri.foundry.main.dataset.d39564f3-817f-4b8a-a8b6-81d4f8fd6bf1")
+)
+import random
+
+def train_valid_split( Long_COVID_Silver_Standard, num_recent_visits):
+    all_person_ids_df = num_recent_visits[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
+    all_person_ids = list(all_person_ids_df["person_id"])
+
+    train_valid_split = 9, 1
+    train_ratio = train_valid_split[0] / (train_valid_split[0] + train_valid_split[1])
+    num_train = int(train_ratio * len(all_person_ids))
+
+    random.shuffle(all_person_ids)
+    train_person_ids, valid_person_ids = all_person_ids[:num_train], all_person_ids[num_train:]
+    split_person_ids_df = pd.DataFrame([[person_id, "train"] for person_id in train_person_ids] + [[person_id, "valid"] for person_id in valid_person_ids], columns=["person_id", "split"]).sort_values("person_id")
+
+    return split_person_ids_df
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.def6f994-533b-46b8-95ab-3708d867119c"),
