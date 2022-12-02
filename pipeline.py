@@ -1610,9 +1610,7 @@ def feature_analysis_tool(all_patients_visit_day_facts_table_de_id, all_patients
         grouped = data.groupby([FEATURE_NAME,"outcome"]).size().to_frame('size').reset_index().rename({"size":"num"}, axis=1)
         s = grouped["num"].sum()
         grouped["ratio"] = grouped.apply(lambda x: x.num/s, axis=1)
-        print(grouped.columns)
         print(grouped)
-        return grouped
     return data
 
 @transform_pandas(
