@@ -1554,6 +1554,68 @@ def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine
 #################################################
 
 @transform_pandas(
+    Output(rid="ri.vector.main.execute.511e026f-ef9b-4f50-8f0a-d4c0855a2390"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
+    all_patients_visit_day_facts_table_de_id=Input(rid="ri.foundry.main.dataset.ace57213-685a-4f18-a157-2b02b41086be")
+)
+def feature_analysis_tool(all_patients_visit_day_facts_table_de_id, all_patients_summary_fact_table_de_id, Long_COVID_Silver_Standard):
+
+    #specify table (either time-series or summary) and feature name
+    TABLE = all_patients_summary_fact_table_de_id
+    FEATURE_NAME = "OBESITY_indicator"
+    IS_CONTINUOUS = False
+
+    Long_COVID_Silver_Standard = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
+    labels_df = Long_COVID_Silver_Standard.select(F.col("person_id"), F.col("outcome"))
+    data = TABLE.join(labels_df, "person_id", "outer")
+    data = data.select(F.col(FEATURE_NAME), F.col("outcome"))
+    #OPTIONAL aggregation, choose one or both
+    # data = data.groupby('person_id','date').agg(F.min(FEATURE_NAME).alias(FEATURE_NAME), F.max('outcome').alias('outcome'))
+    # data = data.groupby('person_id').agg(F.avg(FEATURE_NAME).alias(FEATURE_NAME), F.max('outcome').alias('outcome'))
+    data = data.toPandas()
+    if IS_CONTINUOUS:
+        zipped = list(zip(data[FEATURE_NAME],data.outcome))
+        neg = np.asarray([v for v,o in zipped if o==0]).reshape(-1,1)
+        pos = np.asarray([v for v,o in zipped if o==1]).reshape(-1,1)
+        neg = np.hstack((neg,np.zeros(neg.shape)))
+        pos = np.hstack((pos,np.zeros(pos.shape)))
+        model = sklearn.svm.SVC(kernel='linear', C=4)
+        X, y = data[FEATURE_NAME].to_numpy().reshape(-1, 1), data['outcome']
+        model.fit(X,y)
+        pred = model.predict(data[FEATURE_NAME].to_numpy().reshape(-1, 1))
+        
+        w = model.coef_[0]
+        x_0 = -model.intercept_[0]/w[0]
+        margin = w[0]
+
+        plt.figure()
+        x_min, x_max = min(data[FEATURE_NAME]), max(data[FEATURE_NAME])
+        y_min, y_max = -3, 3
+        yy = np.linspace(y_min, y_max)
+        XX, YY = np.mgrid[x_min:x_max:500j, y_min:y_max:500j]
+        Z = model.predict(np.c_[XX.ravel()]).reshape(XX.shape)
+        plt.pcolormesh(XX, YY, Z, cmap=plt.cm.Paired)
+        plt.plot(x_0*np.ones(shape=yy.shape), yy, 'k-')
+        plt.plot(x_0*np.ones(shape=yy.shape) - margin, yy, 'k--')
+        plt.plot(x_0*np.ones(shape=yy.shape) + margin, yy, 'k--')
+        plt.scatter(pos, np.random.rand()*np.ones(shape=pos.shape), s=10, marker='o', facecolors='C1')
+        plt.scatter(neg, np.random.rand()*-1*np.ones(shape=neg.shape), s=10, marker='^', facecolors='C2')
+        plt.xlim(x_min, x_max)
+        plt.ylim(y_min, y_max)
+        plt.show()
+
+        print("SVM Classification Report:\n{}".format(classification_report(data["outcome"], pred)))
+    else:
+        grouped = data.groupby([FEATURE_NAME,"outcome"]).size().to_frame('size').reset_index().rename({"size":"num"}, axis=1)
+        s = grouped["num"].sum()
+        grouped["ratio"] = grouped.apply(lambda x: x.num/s, axis=1)
+        print(grouped.columns)
+        print(grouped)
+        return grouped
+    return data
+
+@transform_pandas(
     Output(rid="ri.vector.main.execute.5fe4fba8-de72-489d-8a93-4e3398220f66"),
     everyone_conditions_of_interest=Input(rid="ri.foundry.main.dataset.514f3fe8-7565-4701-8982-174b43937006")
 )
