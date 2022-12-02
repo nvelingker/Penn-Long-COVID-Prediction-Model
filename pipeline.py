@@ -1785,6 +1785,7 @@ def feature_analysis_tool(all_patients_visit_day_facts_table_de_id, all_patients
         s = grouped["num"].sum()
         grouped["ratio"] = grouped.apply(lambda x: x.num/s, axis=1)
         print(grouped)
+        print("Pearson coefficient: {}".format(scipy.stats.pearsonr(data[FEATURE_NAME].to_numpy(),data["outcome"].to_numpy())))
     return data
 
 @transform_pandas(
