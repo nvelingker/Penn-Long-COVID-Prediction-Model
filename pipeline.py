@@ -2002,11 +2002,11 @@ def train_sequential_model(train_valid_split, Long_COVID_Silver_Standard, person
     valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=16, shuffle=True, collate_fn=LongCOVIDVisitsDataset.collate_fn)
 
     # Construct model
-    # model = LongCOVIDVisitsLSTMModel()
+    model = LongCOVIDVisitsLSTMModel()
 
     # # Training loop
-    # trainer = Trainer(train_loader, valid_loader, model)
-    # result_model = trainer.train()
+    trainer = Trainer(train_loader, valid_loader, model)
+    result_model = trainer.train()
 
     return train_person_ids
 
