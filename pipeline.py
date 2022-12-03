@@ -219,12 +219,11 @@ def all_patients_summary_fact_table_de_id(all_patients_visit_day_facts_table_de_
     df = df.withColumn('possible_covid_patient', 
         F.when(F.col('confirmed_covid_patient') == 1, 0)
         .when(F.col('Antibody_Pos_indicator') == 1, 1)
-        .when(F.col('LL_Long_COVID_diagnosis_indicator') == 1, 1)
         .when(F.col('LL_Long_COVID_clinic_visit_indicator') == 1, 1)
         .when(F.col('LL_PNEUMONIADUETOCOVID_indicator') == 1, 1)
         .when(F.col('LL_MISC_indicator') == 1, 1)
         .otherwise(0))     
-    
+    #.when(F.col('LL_Long_COVID_diagnosis_indicator') == 1, 1)
     #join above tables on patient ID  
     #df = df.join(deaths_df, 'person_id', 'left').withColumnRenamed('patient_death', 'patient_death_indicator')
     df = everyone_cohort_de_id.join(df, 'person_id','left')
@@ -967,7 +966,6 @@ def everyone_conditions_of_interest(everyone_cohort_de_id, concept_set_members, 
     fusion_df = customized_concept_set_input \
         .filter(customized_concept_set_input.domain.contains('condition')) \
         .select('concept_set_name','indicator_prefix')
-    print(fusion_df.show)
     #filter concept set members table to only concept ids for the conditions of interest
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
