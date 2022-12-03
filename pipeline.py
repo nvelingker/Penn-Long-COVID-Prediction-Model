@@ -223,7 +223,7 @@ def all_patients_summary_fact_table_de_id(all_patients_visit_day_facts_table_de_
         .when(F.col('LL_PNEUMONIADUETOCOVID_indicator') == 1, 1)
         .when(F.col('LL_MISC_indicator') == 1, 1)
         .otherwise(0))     
-    #.when(F.col('LL_Long_COVID_diagnosis_indicator') == 1, 1)
+    #.when(F.col('LL_Long_COVID_diagnosis_indicator') == 1, 1) removed above since it seems this was removed from the conditions table
     #join above tables on patient ID  
     #df = df.join(deaths_df, 'person_id', 'left').withColumnRenamed('patient_death', 'patient_death_indicator')
     df = everyone_cohort_de_id.join(df, 'person_id','left')
