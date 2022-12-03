@@ -967,11 +967,10 @@ def everyone_conditions_of_interest(everyone_cohort_de_id, concept_set_members, 
     fusion_df = customized_concept_set_input \
         .filter(customized_concept_set_input.domain.contains('condition')) \
         .select('concept_set_name','indicator_prefix')
-    print(fusion_df.columns)
     #filter concept set members table to only concept ids for the conditions of interest
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
-        .where(F.col('is_most_recent_version')=='true') \
+        .where(F.col('is_most_recent_version')=='true' | F.col('concept_set_name') == 'LL_Long_COVID_diagnosis_indicator') \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix')
 
