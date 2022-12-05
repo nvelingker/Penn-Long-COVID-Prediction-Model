@@ -72,7 +72,7 @@ group by person_id, data_partner_id
 
 @transform_pandas(
     Output(rid="ri.vector.main.execute.20bfed79-2fea-446f-a920-88f0dbc22bc2"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
     manifest_safe_harbor=Input(rid="ri.foundry.main.dataset.b4407989-1851-4e07-a13f-0539fae10f26")
 )
@@ -91,7 +91,7 @@ SELECT distinct de.person_id,
         else null
         end as vax_type
     
-FROM concept_set_members cs
+FROM custom_concept_set_members cs
 INNER JOIN drug_exposure de on cs.concept_id = de.drug_concept_id
 INNER JOIN manifest_safe_harbor m on de.data_partner_id = m.data_partner_id
 
@@ -153,7 +153,7 @@ where procedure_concept_id IN (766238, 766239, 766241) and po.data_partner_id = 
 
 @transform_pandas(
     Output(rid="ri.vector.main.execute.73881ed9-9110-4370-85ab-4c40e879b3ba"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     drug_exposure_testing=Input(rid="ri.foundry.main.dataset.26a51cab-0279-45a6-bbc0-f44a12b52f9c"),
     manifest_safe_harbor_testing=Input(rid="ri.foundry.main.dataset.7a5c5585-1c69-4bf5-9757-3fd0d0a209a2")
 )
@@ -172,7 +172,7 @@ SELECT distinct de.person_id,
         else null
         end as vax_type
     
-FROM concept_set_members cs
+FROM custom_concept_set_members cs
 INNER JOIN drug_exposure_testing de on cs.concept_id = de.drug_concept_id
 INNER JOIN manifest_safe_harbor_testing m on de.data_partner_id = m.data_partner_id
 

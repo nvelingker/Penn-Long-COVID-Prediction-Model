@@ -1,7 +1,7 @@
 from pyspark.sql import functions as F
 from pyspark.sql.types import IntegerType
 from pyspark.sql import Window
-
+from pyspark.sql import SparkSession
 import pandas as pd
 import sklearn
 import scipy
@@ -465,6 +465,31 @@ def condition_table_analysis(condition_occurrence, Long_COVID_Silver_Standard):
     return r
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
+    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6")
+)
+def custom_concept_set_members(concept_set_members):
+    df = concept_set_members
+    max_codeset_id = df.agg({"codeset_id":"max"}).collect()[0][0]
+    more = df.limit(1).toPandas()
+    #concept_id, concept_name, concept_set_name (all other fields will be autoassigned)
+    data = [
+        ["40170911", "liraglutide", "liraglutide"],
+    ]
+    #codeset_id, concept_id, concept_set_name, is_most_recent (true),version (1), concept_name, archived (false)
+    new_sets = {}
+    for concept_id, concept_name, concept_set_name in data:
+        if concept_set_name not in new_sets:
+            max_codeset_id += 1
+            new_sets[concept_set_name] = max_codeset_id
+        more.loc[len(more.index)] = [new_sets[concept_set_name], concept_id, concept_set_name, True, 1, concept_name, False]
+    more = more.iloc[1: , :]
+    spark = SparkSession.builder.master("local[1]").appName("Penn").getOrCreate()
+    more = spark.createDataFrame(more)
+    mems = more.union(df)
+    return mems
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.2a1d8398-c54a-4732-8f23-073ced750426"),
     LL_concept_sets_fusion_everyone=Input(rid="ri.foundry.main.dataset.b36c87be-4e43-4f55-a1b2-fc48b0576a77")
 )
@@ -496,12 +521,13 @@ def custom_sets(LL_concept_sets_fusion_everyone):
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
     LL_DO_NOT_DELETE_REQUIRED_concept_sets_all=Input(rid="ri.foundry.main.dataset.029aa987-cfef-48fc-bf45-cffd3792cd93"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     custom_sets=Input(rid="ri.foundry.main.dataset.2a1d8398-c54a-4732-8f23-073ced750426")
 )
 #The purpose of this node is to optimize the user's experience connecting a customized concept set "fusion sheet" input data frame to replace LL_concept_sets_fusion_everyone.
 
-def customized_concept_set_input( LL_DO_NOT_DELETE_REQUIRED_concept_sets_all, custom_sets, concept_set_members):
+def customized_concept_set_input( LL_DO_NOT_DELETE_REQUIRED_concept_sets_all, custom_sets, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
     PM_LL_DO_NOT_DELETE_REQUIRED_concept_sets_all = LL_DO_NOT_DELETE_REQUIRED_concept_sets_all
 
     required = LL_DO_NOT_DELETE_REQUIRED_concept_sets_all
@@ -755,7 +781,7 @@ def drug_table_analysis_1(drug_exposure, Long_COVID_Silver_Standard):
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     location=Input(rid="ri.foundry.main.dataset.4805affe-3a77-4260-8da5-4f9ff77f51ab"),
     manifest_safe_harbor=Input(rid="ri.foundry.main.dataset.b4407989-1851-4e07-a13f-0539fae10f26"),
     microvisits_to_macrovisits=Input(rid="ri.foundry.main.dataset.d77a701f-34df-48a1-a71c-b28112a07ffa"),
@@ -766,7 +792,8 @@ def drug_table_analysis_1(drug_exposure, Long_COVID_Silver_Standard):
 #Last Update - 5/6/22
 #Description - This node gathers some commonly used facts about these patients from the "person" and "location" tables, as well as some facts about the patient's institution (from the "manifest" table).  Available age, race, and locations data (including SDOH variables for L3 only) is gathered at this node.  The patient’s total number of visits as well as the number of days in their observation period is calculated from the “microvisits_to_macrovisits” table in this node.  These facts will eventually be joined with the final patient-level table in the final node.
 
-def everyone_cohort_de_id(concept_set_members, person, location, manifest_safe_harbor, microvisits_to_macrovisits):
+def everyone_cohort_de_id( person, location, manifest_safe_harbor, microvisits_to_macrovisits, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
         
     """
     Select proportion of enclave patients to use: A value of 1.0 indicates the pipeline will use all patients in the persons table.  
@@ -900,7 +927,7 @@ def everyone_cohort_de_id(concept_set_members, person, location, manifest_safe_h
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     location_testing=Input(rid="ri.foundry.main.dataset.06b728e0-0262-4a7a-b9b7-fe91c3f7da34"),
     manifest_safe_harbor_testing=Input(rid="ri.foundry.main.dataset.7a5c5585-1c69-4bf5-9757-3fd0d0a209a2"),
     microvisits_to_macrovisits_testing=Input(rid="ri.foundry.main.dataset.f5008fa4-e736-4244-88e1-1da7a68efcdb"),
@@ -911,7 +938,8 @@ def everyone_cohort_de_id(concept_set_members, person, location, manifest_safe_h
 #Last Update - 5/6/22
 #Description - This node gathers some commonly used facts about these patients from the "person" and "location" tables, as well as some facts about the patient's institution (from the "manifest" table).  Available age, race, and locations data (including SDOH variables for L3 only) is gathered at this node.  The patient’s total number of visits as well as the number of days in their observation period is calculated from the “microvisits_to_macrovisits” table in this node.  These facts will eventually be joined with the final patient-level table in the final node.
 
-def everyone_cohort_de_id_testing(concept_set_members, person_testing, location_testing, manifest_safe_harbor_testing, microvisits_to_macrovisits_testing):
+def everyone_cohort_de_id_testing( person_testing, location_testing, manifest_safe_harbor_testing, microvisits_to_macrovisits_testing, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
         
     """
     Select proportion of enclave patients to use: A value of 1.0 indicates the pipeline will use all patients in the persons table.  
@@ -1045,8 +1073,8 @@ def everyone_cohort_de_id_testing(concept_set_members, person_testing, location_
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.514f3fe8-7565-4701-8982-174b43937006"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
     condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input=Input(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
     everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf")
 )
@@ -1055,7 +1083,8 @@ def everyone_cohort_de_id_testing(concept_set_members, person_testing, location_
 #Last Update - 5/6/22
 #Description - This node filters the condition_eras table for rows that have a condition_concept_id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these conditions are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_conditions_of_interest(everyone_cohort_de_id, concept_set_members, condition_occurrence, customized_concept_set_input):
+def everyone_conditions_of_interest(everyone_cohort_de_id, condition_occurrence, customized_concept_set_input, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
 
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
@@ -1092,8 +1121,8 @@ def everyone_conditions_of_interest(everyone_cohort_de_id, concept_set_members, 
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.ae4f0220-6939-4f61-a97a-ff78d29df156"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
     condition_occurrence_testing=Input(rid="ri.foundry.main.dataset.3e01546f-f110-4c67-a6db-9063d2939a74"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
     everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4")
 )
@@ -1102,7 +1131,8 @@ def everyone_conditions_of_interest(everyone_cohort_de_id, concept_set_members, 
 #Last Update - 5/6/22
 #Description - This node filters the condition_eras table for rows that have a condition_concept_id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these conditions are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_conditions_of_interest_testing(everyone_cohort_de_id_testing, concept_set_members, condition_occurrence_testing, customized_concept_set_input_testing):
+def everyone_conditions_of_interest_testing(everyone_cohort_de_id_testing, condition_occurrence_testing, customized_concept_set_input_testing, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
     everyone_cohort_de_id = everyone_cohort_de_id_testing
     customized_concept_set_input = customized_concept_set_input_testing
 
@@ -1144,7 +1174,7 @@ def everyone_conditions_of_interest_testing(everyone_cohort_de_id_testing, conce
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.15ddf371-0d59-4397-9bee-866c880620cf"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input=Input(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
     device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
     everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf")
@@ -1154,7 +1184,8 @@ def everyone_conditions_of_interest_testing(everyone_cohort_de_id_testing, conce
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_devices_of_interest(device_exposure, everyone_cohort_de_id, concept_set_members, customized_concept_set_input):
+def everyone_devices_of_interest(device_exposure, everyone_cohort_de_id, customized_concept_set_input, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
 
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
@@ -1193,7 +1224,7 @@ def everyone_devices_of_interest(device_exposure, everyone_cohort_de_id, concept
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.f423414f-5fc1-4b38-8019-a2176fd99de5"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
     device_exposure_testing=Input(rid="ri.foundry.main.dataset.7e24a101-2206-45d9-bcaa-b9d84bd2f990"),
     everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4")
@@ -1203,7 +1234,8 @@ def everyone_devices_of_interest(device_exposure, everyone_cohort_de_id, concept
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_devices_of_interest_testing(device_exposure_testing, everyone_cohort_de_id_testing, concept_set_members, customized_concept_set_input_testing):
+def everyone_devices_of_interest_testing(device_exposure_testing, everyone_cohort_de_id_testing, customized_concept_set_input_testing, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
     everyone_cohort_de_id = everyone_cohort_de_id_testing
     customized_concept_set_input = customized_concept_set_input_testing
 
@@ -1244,7 +1276,7 @@ def everyone_devices_of_interest_testing(device_exposure_testing, everyone_cohor
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.32bad30b-9322-4e6d-8a88-ab5133e98543"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input=Input(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
     drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
     everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
@@ -1255,7 +1287,8 @@ def everyone_devices_of_interest_testing(device_exposure_testing, everyone_cohor
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_drugs_of_interest(concept_set_members, drug_exposure, everyone_cohort_de_id, customized_concept_set_input, first_covid_positive):
+def everyone_drugs_of_interest( drug_exposure, everyone_cohort_de_id, customized_concept_set_input, first_covid_positive, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
   
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
@@ -1295,7 +1328,7 @@ def everyone_drugs_of_interest(concept_set_members, drug_exposure, everyone_coho
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.c467232f-7ce8-493a-9c58-19438b8bae42"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
     drug_exposure_testing=Input(rid="ri.foundry.main.dataset.26a51cab-0279-45a6-bbc0-f44a12b52f9c"),
     everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
@@ -1306,7 +1339,8 @@ def everyone_drugs_of_interest(concept_set_members, drug_exposure, everyone_coho
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_drugs_of_interest_testing(concept_set_members, drug_exposure_testing, everyone_cohort_de_id_testing, customized_concept_set_input_testing, first_covid_positive_testing):
+def everyone_drugs_of_interest_testing( drug_exposure_testing, everyone_cohort_de_id_testing, customized_concept_set_input_testing, first_covid_positive_testing, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
     everyone_cohort_de_id = everyone_cohort_de_id_testing
     customized_concept_set_input = customized_concept_set_input_testing
   
@@ -1348,7 +1382,7 @@ def everyone_drugs_of_interest_testing(concept_set_members, drug_exposure_testin
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.99e1cf7c-8848-4a3c-8f26-5cc7499311da"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
     measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7")
 )
@@ -1357,7 +1391,8 @@ def everyone_drugs_of_interest_testing(concept_set_members, drug_exposure_testin
 #Last Update - 5/6/22
 #Description - This node filters the measurements table for rows that have a measurement_concept_id associated with one of the concept sets described in the data dictionary in the README.  Indicator names for a positive COVID PCR or AG test, negative COVID PCR or AG test, positive COVID antibody test, and negative COVID antibody test are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date. It also finds the harmonized value as a number for BMI measurements and collapses these values to unique instances on the basis of patient and visit date.  Measurement BMI cutoffs included are intended for adults. Analyses focused on pediatric measurements should use different bounds for BMI measurements. 
 
-def everyone_measurements_of_interest(measurement, concept_set_members, everyone_cohort_de_id):
+def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
     
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id', 'gender_concept_name')
@@ -1455,7 +1490,7 @@ def everyone_measurements_of_interest(measurement, concept_set_members, everyone
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.947ff73f-4427-404f-b65b-2e709cdcbddd"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
     measurement_testing=Input(rid="ri.foundry.main.dataset.b7749e49-cf01-4d0a-a154-2f00eecab21e")
 )
@@ -1464,7 +1499,8 @@ def everyone_measurements_of_interest(measurement, concept_set_members, everyone
 #Last Update - 5/6/22
 #Description - This node filters the measurements table for rows that have a measurement_concept_id associated with one of the concept sets described in the data dictionary in the README.  Indicator names for a positive COVID PCR or AG test, negative COVID PCR or AG test, positive COVID antibody test, and negative COVID antibody test are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date. It also finds the harmonized value as a number for BMI measurements and collapses these values to unique instances on the basis of patient and visit date.  Measurement BMI cutoffs included are intended for adults. Analyses focused on pediatric measurements should use different bounds for BMI measurements. 
 
-def everyone_measurements_of_interest_testing(measurement_testing, concept_set_members, everyone_cohort_de_id_testing):
+def everyone_measurements_of_interest_testing(measurement_testing, everyone_cohort_de_id_testing, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
     
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id_testing.select('person_id', 'gender_concept_name')
@@ -1562,7 +1598,7 @@ def everyone_measurements_of_interest_testing(measurement_testing, concept_set_m
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.d2eefa83-105e-404c-9e21-5475e1e1110c"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input=Input(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
     everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
     observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516")
@@ -1572,7 +1608,8 @@ def everyone_measurements_of_interest_testing(measurement_testing, concept_set_m
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_observations_of_interest(observation, concept_set_members, everyone_cohort_de_id, customized_concept_set_input):
+def everyone_observations_of_interest(observation, everyone_cohort_de_id, customized_concept_set_input, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
    
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
@@ -1604,7 +1641,7 @@ def everyone_observations_of_interest(observation, concept_set_members, everyone
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.746705a9-da68-43c5-8ad9-dad8ab4ab3cf"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
     everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
     observation_testing=Input(rid="ri.foundry.main.dataset.fc1ce22e-9cf6-4335-8ca7-aa8c733d506d")
@@ -1614,7 +1651,8 @@ def everyone_observations_of_interest(observation, concept_set_members, everyone
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_observations_of_interest_testing(observation_testing, concept_set_members, everyone_cohort_de_id_testing, customized_concept_set_input_testing):
+def everyone_observations_of_interest_testing(observation_testing, everyone_cohort_de_id_testing, customized_concept_set_input_testing, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
     everyone_cohort_de_id = everyone_cohort_de_id_testing
     customized_concept_set_input = customized_concept_set_input_testing
    
@@ -1648,7 +1686,7 @@ def everyone_observations_of_interest_testing(observation_testing, concept_set_m
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.ff38921a-cc27-4c35-9a09-9a7ccced1ad6"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input=Input(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
     everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
     procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
@@ -1658,7 +1696,8 @@ def everyone_observations_of_interest_testing(observation_testing, concept_set_m
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_procedures_of_interest(everyone_cohort_de_id, concept_set_members, procedure_occurrence, customized_concept_set_input):
+def everyone_procedures_of_interest(everyone_cohort_de_id, procedure_occurrence, customized_concept_set_input, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
   
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
@@ -1695,7 +1734,7 @@ def everyone_procedures_of_interest(everyone_cohort_de_id, concept_set_members, 
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.a53998dc-abce-48c9-a390-b0cbf8b4a0a2"),
-    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6"),
+    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
     everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
     procedure_occurrence_testing=Input(rid="ri.foundry.main.dataset.88523aaa-75c3-4b55-a79a-ebe27e40ba4f")
@@ -1705,7 +1744,8 @@ def everyone_procedures_of_interest(everyone_cohort_de_id, concept_set_members, 
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_procedures_of_interest_testing(everyone_cohort_de_id_testing, concept_set_members, procedure_occurrence_testing, customized_concept_set_input_testing):
+def everyone_procedures_of_interest_testing(everyone_cohort_de_id_testing, procedure_occurrence_testing, customized_concept_set_input_testing, custom_concept_set_members):
+    concept_set_members = custom_concept_set_members
     everyone_cohort_de_id = everyone_cohort_de_id_testing
     customized_concept_set_input = customized_concept_set_input_testing
   
