@@ -206,11 +206,35 @@ def all_patients_summary_fact_table_de_id(all_patients_visit_day_facts_table_de_
 
     #deaths_df = everyone_patient_deaths.select('person_id','patient_death')
     df = all_patients_visit_day_facts_table_de_id.drop('patient_death_at_visit', 'during_macrovisit_hospitalization')
-  
+    
+    df2 = all_patients_visit_day_facts_table_de_id.select('person_id', 'visit_date', 'Oxygen_saturation').where(all_patients_visit_day_facts_table_de_id.Oxygen_saturation>0)    
+    
+    df3 = all_patients_visit_day_facts_table_de_id.select('person_id', 'visit_date', 'blood_sodium').where(all_patients_visit_day_facts_table_de_id.blood_sodium>0) 
+    
+    df4 = all_patients_visit_day_facts_table_de_id.select('person_id', 'visit_date', 'blood_hemoglobin').where(all_patients_visit_day_facts_table_de_id.blood_hemoglobin>0) 
+
+    df5 = all_patients_visit_day_facts_table_de_id.select('person_id', 'visit_date', 'blood_Creatinine').where(all_patients_visit_day_facts_table_de_id.blood_Creatinine>0)
+
+    df6 = all_patients_visit_day_facts_table_de_id.select('person_id', 'visit_date', 'blood_UreaNitrogen').where(all_patients_visit_day_facts_table_de_id.blood_UreaNitrogen>0)
+
     df = df.groupby('person_id').agg(
         F.max('BMI_rounded').alias('BMI_max_observed_or_calculated'),
-        *[F.max(col).alias(col + '_indicator') for col in df.columns if col not in ('person_id', 'BMI_rounded', 'visit_date', 'had_vaccine_administered')],
+        F.avg('respiratory_rate').alias('respiratory_rate'),
+        *[F.max(col).alias(col + '_indicator') for col in df.columns if col not in ('person_id', 'BMI_rounded', 'visit_date', 'had_vaccine_administered', 'Oxygen_saturation', 'blood_sodium', 'blood_hemoglobin', 'respiratory_rate', 'blood_Creatinine', 'blood_UreaNitrogen')],
         F.sum('had_vaccine_administered').alias('total_number_of_COVID_vaccine_doses'))
+    
+    df2 = df2.groupby('person_id').agg(
+        F.min('Oxygen_saturation').alias('min_Oxygen_saturation'))
+    df3 = df3.groupby('person_id').agg(
+        F.last('blood_sodium').alias('last_blood_sodium'))
+    df4 = df4.groupby('person_id').agg(
+        F.last('blood_hemoglobin').alias('last_blood_hemoglobin'))
+    df5 = df5.groupby('person_id').agg(
+        F.last('blood_Creatinine').alias('last_blood_Creatinine'))
+    df6 = df6.groupby('person_id').agg(
+        F.last('blood_UreaNitrogen').alias('last_blood_UreaNitrogen'))
+    
+    df = df.join(df2, on=['person_id'], how='left').join(df3, on=['person_id'], how='left').join(df4, on=['person_id'], how='left').join(df5, on=['person_id'], how='left').join(df6, on=['person_id'], how='left')
 
     #columns to indicate whether a patient belongs in confirmed or possible subcohorts
     df = df.withColumn('confirmed_covid_patient', 
@@ -1422,6 +1446,31 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     highest_acceptable_weight = 300 #in kgs
     lowest_acceptable_height = .6 #in meters
     highest_acceptable_height = 2.43 #in meters
+#40762499
+    blood_oxygen_codeset_id=[40762499] # normal people: 75-100
+    lowest_blood_oxygen = 20
+    highest_blood_oxygen = 100
+    
+    blood_sodium_codeset_id=[3019550]    # normal people: 137-145
+    lowest_blood_sodium = 90
+    highest_blood_sodium = 200
+    
+    blood_hemoglobin_codeset_id=[3000963]  # normal people: 11-16
+    lowest_blood_hemoglobin = 3
+    highest_blood_hemoglobin = 40
+
+    respiratory_rate_codeset_id=[3024171]  # normal people: 12-20
+    lowest_respiratory_rate=5
+    highest_respiratory_rate=60
+    
+    blood_Creatinine_codeset_id=[3016723]  # normal people: 0.6-1.3
+    lowest_blood_Creatinine = 0.2
+    highest_blood_Creatinine = 5
+
+    blood_UreaNitrogen_codeset_id=[3013682]  # normal people: 10-20
+    lowest_blood_UreaNitrogen = 3
+    highest_blood_UreaNitrogen = 80
+    
 
     bmi_codeset_ids = list(concepts_df.where(
         (concepts_df.concept_set_name=="body mass index") 
@@ -1458,7 +1507,26 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
         .withColumn('Recorded_BMI', F.when(df.measurement_concept_id.isin(bmi_codeset_ids) & df.harmonized_value_as_number.between(lowest_acceptable_BMI, highest_acceptable_BMI), df.harmonized_value_as_number).otherwise(0)) \
         .withColumn('height', F.when(df.measurement_concept_id.isin(height_codeset_ids) & df.harmonized_value_as_number.between(lowest_acceptable_height, highest_acceptable_height), df.harmonized_value_as_number).otherwise(0)) \
         .withColumn('weight', F.when(df.measurement_concept_id.isin(weight_codeset_ids) & df.harmonized_value_as_number.between(lowest_acceptable_weight, highest_acceptable_weight), df.harmonized_value_as_number).otherwise(0)) 
-        
+
+    blood_oxygen_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('Oxygen_saturation', F.when(df.measurement_concept_id.isin(blood_oxygen_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_oxygen, highest_blood_oxygen), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_sodium_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_sodium', F.when(df.measurement_concept_id.isin(blood_sodium_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_sodium, highest_blood_sodium), df.harmonized_value_as_number).otherwise(0))
+
+   
+    blood_hemoglobin_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_hemoglobin', F.when(df.measurement_concept_id.isin(blood_hemoglobin_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_hemoglobin, highest_blood_hemoglobin), df.harmonized_value_as_number).otherwise(0))
+    
+    respiratory_rate_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('respiratory_rate', F.when(df.measurement_concept_id.isin(respiratory_rate_codeset_id) & df.harmonized_value_as_number.between(lowest_respiratory_rate, highest_respiratory_rate), df.harmonized_value_as_number).otherwise(0))
+ 
+    blood_Creatinine_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Creatinine', F.when(df.measurement_concept_id.isin(blood_Creatinine_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Creatinine, highest_blood_Creatinine), df.harmonized_value_as_number).otherwise(0))
+
+    blood_UreaNitrogen_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_UreaNitrogen', F.when(df.measurement_concept_id.isin(blood_UreaNitrogen_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_UreaNitrogen, highest_blood_UreaNitrogen), df.harmonized_value_as_number).otherwise(0))
+
     labs_df = df.withColumn('PCR_AG_Pos', F.when(df.measurement_concept_id.isin(pcr_ag_test_ids) & df.value_as_concept_id.isin(covid_positive_measurement_ids), 1).otherwise(0)) \
         .withColumn('PCR_AG_Neg', F.when(df.measurement_concept_id.isin(pcr_ag_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0)) \
         .withColumn('Antibody_Pos', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_positive_measurement_ids), 1).otherwise(0)) \
@@ -1477,6 +1545,30 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     F.max('Antibody_Neg').alias('Antibody_Neg'),
     F.max('SEX').alias('SEX'))
 
+    blood_oxygen_df = blood_oxygen_df.groupby('person_id', 'visit_date').agg(
+    F.max('Oxygen_saturation').alias('Oxygen_saturation')
+    )
+
+    blood_sodium_df = blood_sodium_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_sodium').alias('blood_sodium')
+    )
+
+    blood_hemoglobin_df = blood_hemoglobin_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_hemoglobin').alias('blood_hemoglobin')
+    )
+
+    respiratory_rate_df = respiratory_rate_df.groupby('person_id', 'visit_date').agg(
+    F.max('respiratory_rate').alias('respiratory_rate')
+    )
+
+    blood_Creatinine_df = blood_Creatinine_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Creatinine').alias('blood_Creatinine')
+    )
+
+    blood_UreaNitrogen_df = blood_UreaNitrogen_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_UreaNitrogen').alias('blood_UreaNitrogen')
+    )
+
     #add a calculated BMI for each visit date when height and weight available.  Note that if only one is available, it will result in zero
     #subsequent filter out rows that would have resulted from unreasonable calculated_BMI being used as best_BMI for the visit 
     BMI_df = BMI_df.withColumn('calculated_BMI', (BMI_df.weight/(BMI_df.height*BMI_df.height)))
@@ -1488,7 +1580,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     BMI_df = BMI_df.withColumn('OBESITY', F.when(BMI_df.BMI_rounded>=30, 1).otherwise(0))
 
     #join BMI_df with labs_df to retain all lab results with only reasonable BMI_rounded and OBESITY flags
-    df = labs_df.join(BMI_df, on=['person_id', 'visit_date'], how='left')
+    df = labs_df.join(BMI_df, on=['person_id', 'visit_date'], how='left').join(blood_oxygen_df, on=['person_id', 'visit_date'], how='left').join(blood_sodium_df, on=['person_id', 'visit_date'], how='left').join(blood_hemoglobin_df, on=['person_id', 'visit_date'], how='left').join(respiratory_rate_df, on=['person_id', 'visit_date'], how='left').join(blood_Creatinine_df, on=['person_id', 'visit_date'], how='left').join(blood_UreaNitrogen_df, on=['person_id', 'visit_date'], how='left')
 
     return df
 
