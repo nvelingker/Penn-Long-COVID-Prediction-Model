@@ -503,6 +503,9 @@ def custom_concept_set_members(concept_set_members):
         ["19127775","prednisone 5 MG Oral Capsule", "predisone_penn"],
         ["19078925","midazolam 5 MG/ML Injectable Solution", "midazolam_penn"],
         ["45774751","empagliflozin", "empagliflozin_penn"],
+        ["40170911", "liraglutide", "liraglutide"],
+        ["4185623", "Fall risk assessment", "fall_risk_assessment_penn"],
+        ["43018325", "Performance of Urinary Filtration, Continuous, Greater than 18 hours Per Day", "urinary_filtration_penn"]
     ]
     #
     #codeset_id, concept_id, concept_set_name, is_most_recent (true),version (1), concept_name, archived (false)
@@ -546,6 +549,10 @@ def custom_sets(LL_concept_sets_fusion_everyone):
     df.loc[len(df.index)] = ['prednisone_penn', 'PREDNISONE', 'drug']
     df.loc[len(df.index)] = ['midazolam_penn', 'MIDAZOLAM', 'drug']
     df.loc[len(df.index)] = ['empagliflozin_penn', 'empagliflozin', 'drug']
+    df.loc[len(df.index)] = ['fall_risk_assessment_penn', 'FALL_RISK', 'procedure']
+    df.loc[len(df.index)] = ['urinary_filtration_penn', 'URINARY_FILTRATION', 'procedure']
+    
+    
 
     print(df)
     return df
