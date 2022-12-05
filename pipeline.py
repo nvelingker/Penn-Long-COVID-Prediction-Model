@@ -2177,7 +2177,7 @@ def top_concept_ids(condition_table_analysis, device_table_analysis_1, drug_tabl
     procedure_table_analysis_1 = procedure_table_analysis_1.withColumn("procedure", F.lit("condition"))
     observation_table_analysis_1 = observation_table_analysis_1.withColumn("observation", F.lit("condition"))
     r = observation_table_analysis_1.union(procedure_table_analysis_1).union(drug_table_analysis_1).union(device_table_analysis_1).union(condition_table_analysis)
-    r = r.withColumn("scale", F.when((F.col("max") > 0.9), F.col("max")*F.col("count")).otherwise(F.lit(0)))
+    r = r.withColumn("scale_above_.9", F.when((F.col("max") > 0.9), F.col("max")*F.col("count")).otherwise(F.lit(0)))
     return r
 
 @transform_pandas(
