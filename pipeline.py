@@ -17,178 +17,178 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import classification_report
 import numpy as np
 from matplotlib import pyplot as plt
+import time
+# import torch
 
-import torch
+# # Set default dtype
+# torch.set_default_dtype(torch.float32)
 
-# Set default dtype
-torch.set_default_dtype(torch.float32)
+# # Evaluation Label Setups
+# LABEL_SETUPS = [
+#     "prior", # Only take `pasc_code_prior_four_weeks` as label
+#     "after", # Only take `pasc_code_after_four_weeks` as label
+#     "both", # Take the `or` of both `pasc_code_prior_four_weeks` and `pasc_code_after_four_weeks` as label
+# ]
 
-# Evaluation Label Setups
-LABEL_SETUPS = [
-    "prior", # Only take `pasc_code_prior_four_weeks` as label
-    "after", # Only take `pasc_code_after_four_weeks` as label
-    "both", # Take the `or` of both `pasc_code_prior_four_weeks` and `pasc_code_after_four_weeks` as label
-]
+# # Visits Dataset for sequential
+# class LongCOVIDVisitsDataset(torch.utils.data.Dataset):
+#     def __init__(self, person_id, person_info, recent_visit, label, setup="both"):
+#         self.person_ids = person_id
+#         self.person_info = person_info.set_index("person_id")
+#         self.recent_visit = recent_visit.set_index(["person_id", "visit_date"])
+#         self.label = label.set_index("person_id")
+#         self.setup = setup
 
-# Visits Dataset for sequential
-class LongCOVIDVisitsDataset(torch.utils.data.Dataset):
-    def __init__(self, person_id, person_info, recent_visit, label, setup="both"):
-        self.person_ids = person_id
-        self.person_info = person_info.set_index("person_id")
-        self.recent_visit = recent_visit.set_index(["person_id", "visit_date"])
-        self.label = label.set_index("person_id")
-        self.setup = setup
+#         assert len(self.person_ids) == len(self.label)
+#         assert len(self.person_info) == len(self.label)
 
-        assert len(self.person_ids) == len(self.label)
-        assert len(self.person_info) == len(self.label)
+#     def __len__(self):
+#         return len(self.person_info)
 
-    def __len__(self):
-        return len(self.person_info)
+#     def __getitem__(self, idx):
+#         person_id = self.person_ids.iloc[idx]["person_id"]
 
-    def __getitem__(self, idx):
-        person_id = self.person_ids.iloc[idx]["person_id"]
+#         # Encode person_info into vector
+#         person_info = self.person_info.loc[person_id]
+#         person_info_tensor = torch.tensor([
+#             person_info["normalized_age"], 
+#             person_info["is_male"], 
+#             person_info["is_female"], 
+#             person_info["is_other_gender"]
+#         ])
 
-        # Encode person_info into vector
-        person_info = self.person_info.loc[person_id]
-        person_info_tensor = torch.tensor([
-            person_info["normalized_age"], 
-            person_info["is_male"], 
-            person_info["is_female"], 
-            person_info["is_other_gender"]
-        ])
+#         # Encode each visit into vector
+#         visits = self.recent_visit.loc[person_id]
+#         visit_tensors = []
+#         for i in range(len(visits)):
+#             visit = visits.iloc[i]
+#             visit_tensor = torch.tensor([visit["diff_date"] / 180] + list(visit[5:]))
+#             visit_tensors.append(visit_tensor)
+#         visits_tensor = torch.stack(visit_tensors)
 
-        # Encode each visit into vector
-        visits = self.recent_visit.loc[person_id]
-        visit_tensors = []
-        for i in range(len(visits)):
-            visit = visits.iloc[i]
-            visit_tensor = torch.tensor([visit["diff_date"] / 180] + list(visit[5:]))
-            visit_tensors.append(visit_tensor)
-        visits_tensor = torch.stack(visit_tensors)
+#         # Obtain the label
+#         label_row = self.label.loc[person_id]
+#         if self.setup == "prior":
+#             label_tensor = torch.tensor(label_row["pasc_code_prior_four_weeks"])
+#         elif self.setup == "after":
+#             label_tensor = torch.tensor(label_row["pasc_code_after_four_weeks"])
+#         elif self.setup == "both":
+#             label_tensor = torch.tensor(max(label_row["pasc_code_after_four_weeks"], label_row["pasc_code_prior_four_weeks"]))
+#         else:
+#             raise Exception(f"Unknown setup `{self.setup}`")
 
-        # Obtain the label
-        label_row = self.label.loc[person_id]
-        if self.setup == "prior":
-            label_tensor = torch.tensor(label_row["pasc_code_prior_four_weeks"])
-        elif self.setup == "after":
-            label_tensor = torch.tensor(label_row["pasc_code_after_four_weeks"])
-        elif self.setup == "both":
-            label_tensor = torch.tensor(max(label_row["pasc_code_after_four_weeks"], label_row["pasc_code_prior_four_weeks"]))
-        else:
-            raise Exception(f"Unknown setup `{self.setup}`")
+#         return ((person_info_tensor, visits_tensor), label_tensor)
 
-        return ((person_info_tensor, visits_tensor), label_tensor)
+#     @staticmethod
+#     def collate_fn(data):
+#         batched_person_info_tensor = torch.stack([person_info for ((person_info, _), _) in data]).to(dtype=torch.float32)
+#         batched_visits_tensor = torch.nn.utils.rnn.pad_sequence([visits for ((_, visits), _) in data]).to(dtype=torch.float32)
+#         batched_label_tensor = torch.stack([label for (_, label) in data]).to(dtype=torch.float32)
+#         return ((batched_person_info_tensor, batched_visits_tensor), batched_label_tensor)
 
-    @staticmethod
-    def collate_fn(data):
-        batched_person_info_tensor = torch.stack([person_info for ((person_info, _), _) in data]).to(dtype=torch.float32)
-        batched_visits_tensor = torch.nn.utils.rnn.pad_sequence([visits for ((_, visits), _) in data]).to(dtype=torch.float32)
-        batched_label_tensor = torch.stack([label for (_, label) in data]).to(dtype=torch.float32)
-        return ((batched_person_info_tensor, batched_visits_tensor), batched_label_tensor)
+# class LongCOVIDVisitsLSTMModel(torch.nn.Module):
+#     def __init__(
+#         self, 
+#         person_info_dim=4,
+#         visit_dim=72,
+#         latent_dim=128, 
+#         encoder_num_layers=1,
+#         decoder_num_layers=1,
+#     ):
+#         super(LongCOVIDVisitsLSTMModel, self).__init__()
 
-class LongCOVIDVisitsLSTMModel(torch.nn.Module):
-    def __init__(
-        self, 
-        person_info_dim=4,
-        visit_dim=72,
-        latent_dim=128, 
-        encoder_num_layers=1,
-        decoder_num_layers=1,
-    ):
-        super(LongCOVIDVisitsLSTMModel, self).__init__()
+#         # Configurations
+#         self.person_info_dim = person_info_dim
+#         self.visit_dim = visit_dim
+#         self.latent_dim = latent_dim
+#         self.encoder_num_layers = encoder_num_layers
+#         self.decoder_num_layers = decoder_num_layers
 
-        # Configurations
-        self.person_info_dim = person_info_dim
-        self.visit_dim = visit_dim
-        self.latent_dim = latent_dim
-        self.encoder_num_layers = encoder_num_layers
-        self.decoder_num_layers = decoder_num_layers
+#         # Person info encoder
+#         encoder_layers = [torch.nn.Linear(self.person_info_dim, self.latent_dim).to(dtype=torch.float32)]
+#         for _ in range(encoder_num_layers):
+#             encoder_layers += [torch.nn.ReLU(), torch.nn.Linear(self.latent_dim, self.latent_dim)]
+#         self.person_info_encoder = torch.nn.Sequential(*encoder_layers).to(dtype=torch.float32)
 
-        # Person info encoder
-        encoder_layers = [torch.nn.Linear(self.person_info_dim, self.latent_dim).to(dtype=torch.float32)]
-        for _ in range(encoder_num_layers):
-            encoder_layers += [torch.nn.ReLU(), torch.nn.Linear(self.latent_dim, self.latent_dim)]
-        self.person_info_encoder = torch.nn.Sequential(*encoder_layers).to(dtype=torch.float32)
+#         # Visits encoder
+#         self.rnn = torch.nn.LSTM(self.visit_dim, self.latent_dim, 1).to(dtype=torch.float32)
+#         self.rnn_c0 = torch.nn.Embedding(1, self.latent_dim).to(dtype=torch.float32)
 
-        # Visits encoder
-        self.rnn = torch.nn.LSTM(self.visit_dim, self.latent_dim, 1).to(dtype=torch.float32)
-        self.rnn_c0 = torch.nn.Embedding(1, self.latent_dim).to(dtype=torch.float32)
+#         # Final predictor
+#         predictor_layers = []
+#         for _ in range(self.decoder_num_layers):
+#             predictor_layers += [torch.nn.Linear(self.latent_dim, self.latent_dim), torch.nn.ReLU()]
+#         predictor_layers += [torch.nn.Linear(self.latent_dim, 1), torch.nn.Sigmoid()]
+#         self.predictor = torch.nn.Sequential(*predictor_layers).to(dtype=torch.float32)
 
-        # Final predictor
-        predictor_layers = []
-        for _ in range(self.decoder_num_layers):
-            predictor_layers += [torch.nn.Linear(self.latent_dim, self.latent_dim), torch.nn.ReLU()]
-        predictor_layers += [torch.nn.Linear(self.latent_dim, 1), torch.nn.Sigmoid()]
-        self.predictor = torch.nn.Sequential(*predictor_layers).to(dtype=torch.float32)
+#     def forward(self, person_info, visits):
+#         batch_size, _ = person_info.shape
+#         h0 = self.person_info_encoder(person_info).view(1, batch_size, -1)
+#         c0 = self.rnn_c0(torch.tensor([0] * batch_size, dtype=torch.long)).view(1, batch_size, -1)
+#         _, (hn, cn) = self.rnn(visits, (h0, c0))
+#         y_pred = self.predictor(cn).view(batch_size)
+#         return y_pred
 
-    def forward(self, person_info, visits):
-        batch_size, _ = person_info.shape
-        h0 = self.person_info_encoder(person_info).view(1, batch_size, -1)
-        c0 = self.rnn_c0(torch.tensor([0] * batch_size, dtype=torch.long)).view(1, batch_size, -1)
-        _, (hn, cn) = self.rnn(visits, (h0, c0))
-        y_pred = self.predictor(cn).view(batch_size)
-        return y_pred
+# class Trainer:
+#     def __init__(self, train_loader, test_loader, model, lr=0.0001, num_epochs=5):
+#         self.train_loader = train_loader
+#         self.test_loader = test_loader
+#         self.model = model
+#         self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+#         self.loss_fn = torch.nn.MSELoss()
+#         self.num_epochs = num_epochs
 
-class Trainer:
-    def __init__(self, train_loader, test_loader, model, lr=0.0001, num_epochs=5):
-        self.train_loader = train_loader
-        self.test_loader = test_loader
-        self.model = model
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-        self.loss_fn = torch.nn.MSELoss()
-        self.num_epochs = num_epochs
-
-    def train_epoch(self, epoch):
-        self.model.train()
-        total_loss = 0
-        num_batches = 0
-        for (x, y) in self.train_loader:
-            self.optimizer.zero_grad()
-            y_pred = self.model(*x)
-            loss = self.loss_fn(y_pred, y)
-            total_loss += loss.item()
-            num_batches += 1
-            loss.backward()
-            self.optimizer.step()
-        print(f"[Train epoch {epoch}] Avg Loss: {total_loss / num_batches}")
+#     def train_epoch(self, epoch):
+#         self.model.train()
+#         total_loss = 0
+#         num_batches = 0
+#         for (x, y) in self.train_loader:
+#             self.optimizer.zero_grad()
+#             y_pred = self.model(*x)
+#             loss = self.loss_fn(y_pred, y)
+#             total_loss += loss.item()
+#             num_batches += 1
+#             loss.backward()
+#             self.optimizer.step()
+#         print(f"[Train epoch {epoch}] Avg Loss: {total_loss / num_batches}")
             
-    def test_epoch(self, epoch):
-        self.model.eval()
-        num_items = len(self.test_loader.dataset)
-        total_loss = 0
-        num_batches = 0
-        num_correct = 0
-        num_total = 0
-        num_tp, num_fp, num_tn, num_fn = 0, 0, 0, 0
+#     def test_epoch(self, epoch):
+#         self.model.eval()
+#         num_items = len(self.test_loader.dataset)
+#         total_loss = 0
+#         num_batches = 0
+#         num_correct = 0
+#         num_total = 0
+#         num_tp, num_fp, num_tn, num_fn = 0, 0, 0, 0
 
-        for (x, y) in self.test_loader:
-            y_pred = self.model(*x)
-            loss = self.loss_fn(y_pred, y)
-            total_loss += loss.item()
-            num_batches += 1
-            batch_size = len(y)
-            for i in range(batch_size):
-                gt = y[i].item()
-                pred = 1 if y_pred[i].item() > 0.5 else 0
-                correct = gt == pred
-                if correct: num_correct += 1
-                if gt == 1 and pred == 1: num_tp += 1
-                if gt == 1 and pred == 0: num_fn += 1
-                if gt == 0 and pred == 1: num_fp += 1
-                if gt == 0 and pred == 0: num_tn += 1
-                num_total += 1
+#         for (x, y) in self.test_loader:
+#             y_pred = self.model(*x)
+#             loss = self.loss_fn(y_pred, y)
+#             total_loss += loss.item()
+#             num_batches += 1
+#             batch_size = len(y)
+#             for i in range(batch_size):
+#                 gt = y[i].item()
+#                 pred = 1 if y_pred[i].item() > 0.5 else 0
+#                 correct = gt == pred
+#                 if correct: num_correct += 1
+#                 if gt == 1 and pred == 1: num_tp += 1
+#                 if gt == 1 and pred == 0: num_fn += 1
+#                 if gt == 0 and pred == 1: num_fp += 1
+#                 if gt == 0 and pred == 0: num_tn += 1
+#                 num_total += 1
 
-        precision = num_tp / (num_tp + num_fp)
-        recall = num_tp / (num_tp + num_fn)
+#         precision = num_tp / (num_tp + num_fp)
+#         recall = num_tp / (num_tp + num_fn)
 
-        print(f"[Test epoch {epoch}] Avg Loss: {total_loss / num_batches}, Accuracy: {num_correct / num_total}, Precision: {precision}, Recall: {recall}")
+#         print(f"[Test epoch {epoch}] Avg Loss: {total_loss / num_batches}, Accuracy: {num_correct / num_total}, Precision: {precision}, Recall: {recall}")
 
-    def train(self):
-        self.test_epoch(0)
-        for epoch in range(1, self.num_epochs + 1):
-            self.train_epoch(epoch)
-            self.test_epoch(epoch)
-        return self.model
+#     def train(self):
+#         self.test_epoch(0)
+#         for epoch in range(1, self.num_epochs + 1):
+#             self.train_epoch(epoch)
+#             self.test_epoch(epoch)
+#         return self.model
 
             
 
@@ -430,6 +430,41 @@ def all_patients_visit_day_facts_table_de_id_testing(everyone_conditions_of_inte
 #################################################
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.bcbf4137-1508-42b5-bb05-631492b8d3b9"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2")
+)
+def condition_table_analysis(condition_occurrence, Long_COVID_Silver_Standard):
+    TABLE = condition_occurrence
+    CONCEPT_NAME_COL = "condition_concept_name"
+    l, h = 0, 1000
+
+    label = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
+    TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
+    distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
+    
+    pos, count = [], []
+    cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
+    print(len(distinct))
+    t = time.time()
+    for cname in distinct[l:]:
+        f = TABLE.agg(
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1))
+        ).collect()
+        one_count = f[0][1]
+        size = f[0][0]
+        pos.append(one_count/size)
+        count.append(size)
+    print(time.time() - t)
+    r = pd.DataFrame(list(zip(distinct,pos, count)), columns=[CONCEPT_NAME_COL,"pos", "count"])
+    r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
+    r['max'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r =r[[CONCEPT_NAME_COL,'pos','neg','max','count']]
+    
+    return r
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.2a1d8398-c54a-4732-8f23-073ced750426"),
     LL_concept_sets_fusion_everyone=Input(rid="ri.foundry.main.dataset.b36c87be-4e43-4f55-a1b2-fc48b0576a77")
 )
@@ -647,6 +682,76 @@ def deduplicated_testing(distinct_vax_person_testing):
     )
 
     return df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.ffc3d120-eaa8-4a04-8bcb-69b6dcb16ad8"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874")
+)
+def device_table_analysis_1(device_exposure, Long_COVID_Silver_Standard):
+    TABLE = device_exposure
+    CONCEPT_NAME_COL = "device_concept_name"
+    l, h = 0, 1000
+
+    label = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
+    TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
+    distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
+    
+    pos, count = [], []
+    cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
+    print(len(distinct))
+    t = time.time()
+    for cname in distinct[l:]:
+        f = TABLE.agg(
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1))
+        ).collect()
+        one_count = f[0][1]
+        size = f[0][0]
+        pos.append(one_count/size)
+        count.append(size)
+    print(time.time() - t)
+    r = pd.DataFrame(list(zip(distinct,pos, count)), columns=[CONCEPT_NAME_COL,"pos", "count"])
+    r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
+    r['max'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r =r[[CONCEPT_NAME_COL,'pos','neg','max','count']]
+    
+    return r
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.2a5480ef-7699-4f0c-bf5c-2a0f8401224d"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5")
+)
+def drug_table_analysis_1(drug_exposure, Long_COVID_Silver_Standard):
+    TABLE = drug_exposure
+    CONCEPT_NAME_COL = "drug_concept_name"
+    l, h = 0, 1000
+
+    label = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
+    TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
+    distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
+    
+    pos, count = [], []
+    cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
+    print(len(distinct))
+    t = time.time()
+    for cname in distinct[l:]:
+        f = TABLE.agg(
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1))
+        ).collect()
+        one_count = f[0][1]
+        size = f[0][0]
+        pos.append(one_count/size)
+        count.append(size)
+    print(time.time() - t)
+    r = pd.DataFrame(list(zip(distinct,pos, count)), columns=[CONCEPT_NAME_COL,"pos", "count"])
+    r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
+    r['max'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r =r[[CONCEPT_NAME_COL,'pos','neg','max','count']]
+    
+    return r
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
@@ -1895,6 +2000,41 @@ def num_recent_visits(recent_visits):
     return df
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.d049152c-00c4-4584-aa28-c0d4a4177b22"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516")
+)
+def observation_table_analysis_1(observation, Long_COVID_Silver_Standard):
+    TABLE = observation
+    CONCEPT_NAME_COL = "observation_concept_name"
+    l, h = 0, 1000
+
+    label = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
+    TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
+    distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
+    
+    pos, count = [], []
+    cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
+    print(len(distinct))
+    t = time.time()
+    for cname in distinct[l:]:
+        f = TABLE.agg(
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1))
+        ).collect()
+        one_count = f[0][1]
+        size = f[0][0]
+        pos.append(one_count/size)
+        count.append(size)
+    print(time.time() - t)
+    r = pd.DataFrame(list(zip(distinct,pos, count)), columns=[CONCEPT_NAME_COL,"pos", "count"])
+    r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
+    r['max'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r =r[[CONCEPT_NAME_COL,'pos','neg','max','count']]
+    
+    return r
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.2f6ebf73-3a2d-43dc-ace9-da56da4b1743"),
     everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf")
 )
@@ -1917,6 +2057,41 @@ def person_information(everyone_cohort_de_id):
 
     # Return
     return df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.166746be-24ec-4f37-84e0-141c8e56706b"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
+)
+def procedure_table_analysis_1(procedure_occurrence, Long_COVID_Silver_Standard):
+    TABLE = procedure_occurrence
+    CONCEPT_NAME_COL = "procedure_concept_name"
+    l, h = 0, 1000
+
+    label = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
+    TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
+    distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
+    
+    pos, count = [], []
+    cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
+    print(len(distinct))
+    t = time.time()
+    for cname in distinct[l:]:
+        f = TABLE.agg(
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1))
+        ).collect()
+        one_count = f[0][1]
+        size = f[0][0]
+        pos.append(one_count/size)
+        count.append(size)
+    print(time.time() - t)
+    r = pd.DataFrame(list(zip(distinct,pos, count)), columns=[CONCEPT_NAME_COL,"pos", "count"])
+    r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
+    r['max'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r =r[[CONCEPT_NAME_COL,'pos','neg','max','count']]
+    
+    return r
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.d42a9b47-a06f-4d43-b113-7414a1bdb9b6"),
@@ -1986,6 +2161,24 @@ def recent_visits_w_nlp_notes(recent_visits, person_nlp_symptom):
     df = recent_visits.merge(person_nlp_symptom, on=["person_id", "visit_date"], how="left").sort_values(["person_id", "visit_date"]).fillna(0.0)
 
     return df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.133d515d-3a27-46b1-acbe-749a21a788e9"),
+    condition_table_analysis=Input(rid="ri.foundry.main.dataset.bcbf4137-1508-42b5-bb05-631492b8d3b9"),
+    device_table_analysis_1=Input(rid="ri.foundry.main.dataset.ffc3d120-eaa8-4a04-8bcb-69b6dcb16ad8"),
+    drug_table_analysis_1=Input(rid="ri.foundry.main.dataset.2a5480ef-7699-4f0c-bf5c-2a0f8401224d"),
+    observation_table_analysis_1=Input(rid="ri.foundry.main.dataset.d049152c-00c4-4584-aa28-c0d4a4177b22"),
+    procedure_table_analysis_1=Input(rid="ri.foundry.main.dataset.166746be-24ec-4f37-84e0-141c8e56706b")
+)
+def top_concept_ids(condition_table_analysis, device_table_analysis_1, drug_table_analysis_1, procedure_table_analysis_1, observation_table_analysis_1):
+    condition_table_analysis = condition_table_analysis.withColumn("domain", F.lit("condition"))
+    device_table_analysis_1 = device_table_analysis_1.withColumn("device", F.lit("condition"))
+    drug_table_analysis_1 = drug_table_analysis_1.withColumn("drug", F.lit("condition"))
+    procedure_table_analysis_1 = procedure_table_analysis_1.withColumn("procedure", F.lit("condition"))
+    observation_table_analysis_1 = observation_table_analysis_1.withColumn("observation", F.lit("condition"))
+    r = observation_table_analysis_1.union(procedure_table_analysis_1).union(drug_table_analysis_1).union(device_table_analysis_1).union(condition_table_analysis)
+    r = r.withColumn("scale", F.when((F.col("max") > 0.9), F.col("max")*F.col("count")).otherwise(F.lit(0)))
+    return r
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.e870e250-353c-4263-add9-98ce1858f0c6"),
