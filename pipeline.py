@@ -2172,10 +2172,10 @@ def recent_visits_w_nlp_notes(recent_visits, person_nlp_symptom):
 )
 def top_concept_ids(condition_table_analysis, device_table_analysis_1, drug_table_analysis_1, procedure_table_analysis_1, observation_table_analysis_1):
     condition_table_analysis = condition_table_analysis.withColumn("domain", F.lit("condition"))
-    device_table_analysis_1 = device_table_analysis_1.withColumn("device", F.lit("condition"))
-    drug_table_analysis_1 = drug_table_analysis_1.withColumn("drug", F.lit("condition"))
-    procedure_table_analysis_1 = procedure_table_analysis_1.withColumn("procedure", F.lit("condition"))
-    observation_table_analysis_1 = observation_table_analysis_1.withColumn("observation", F.lit("condition"))
+    device_table_analysis_1 = device_table_analysis_1.withColumn("domain", F.lit("device"))
+    drug_table_analysis_1 = drug_table_analysis_1.withColumn("domain", F.lit("drug_concept_name"))
+    procedure_table_analysis_1 = procedure_table_analysis_1.withColumn("domain", F.lit("procedure"))
+    observation_table_analysis_1 = observation_table_analysis_1.withColumn("domain", F.lit("observation"))
     r = observation_table_analysis_1.union(procedure_table_analysis_1).union(drug_table_analysis_1).union(device_table_analysis_1).union(condition_table_analysis)
     r = r.withColumn("scale_above_.9", F.when((F.col("max") > 0.9), F.col("max")*F.col("count")).otherwise(F.lit(0)))
     return r
