@@ -473,9 +473,14 @@ def custom_concept_set_members(concept_set_members):
     max_codeset_id = df.agg({"codeset_id":"max"}).collect()[0][0]
     more = df.limit(1).toPandas()
     #concept_id, concept_name, concept_set_name (all other fields will be autoassigned)
+    #ADD NEW SETS HERE
     data = [
-        ["40170911", "liraglutide", "liraglutide"],
+        ["40170911", "liraglutide", "liraglutide_penn"],
+        ["19127775","prednisone 5 MG Oral Capsule", "predisone_penn"],
+        ["19078925","midazolam 5 MG/ML Injectable Solution", "midazolam_penn"],
+        ["45774751","empagliflozin", "empagliflozin_penn"],
     ]
+    #
     #codeset_id, concept_id, concept_set_name, is_most_recent (true),version (1), concept_name, archived (false)
     new_sets = {}
     for concept_id, concept_name, concept_set_name in data:
@@ -513,7 +518,10 @@ def custom_sets(LL_concept_sets_fusion_everyone):
     df.loc[len(df.index)] = ['Long Hauler symptoms from LANCET paper', 'LANCET', 'condition,observation']
     df.loc[len(df.index)] = ['Systemic Antibiotics', 'ANTIBIOTICS', 'drug']
     df.loc[len(df.index)] = ['Antibiotics_wide', 'ANTIBIOTICS', 'drug']
-    
+    df.loc[len(df.index)] = ['liraglutide_penn', 'LIRAGLUTIDE', 'drug']
+    df.loc[len(df.index)] = ['prednisone_penn', 'PREDNISONE', 'drug']
+    df.loc[len(df.index)] = ['midazolam_penn', 'MIDAZOLAM', 'drug']
+    df.loc[len(df.index)] = ['empagliflozin_penn', 'empagliflozin', 'drug']
 
     print(df)
     return df
@@ -2217,7 +2225,7 @@ def top_concept_ids(condition_table_analysis, device_table_analysis_1, drug_tabl
     procedure_table_analysis_1 = procedure_table_analysis_1.withColumn("domain", F.lit("procedure"))
     observation_table_analysis_1 = observation_table_analysis_1.withColumn("domain", F.lit("observation"))
     r = observation_table_analysis_1.union(procedure_table_analysis_1).union(drug_table_analysis_1).union(device_table_analysis_1).union(condition_table_analysis)
-    r = r.withColumn("scale_above_.9", F.when((F.col("max") > 0.9), F.col("max")*F.col("count")).otherwise(F.lit(0)))
+    r = r.withColumn("scale_above_.8", F.when((F.col("max") > 0.8), F.col("max")*F.col("count")).otherwise(F.lit(0)))
     return r
 
 @transform_pandas(
