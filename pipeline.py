@@ -1439,7 +1439,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     persons = everyone_cohort_de_id.select('person_id', 'gender_concept_name')
     #filter procedure occurrence table to only cohort patients    
     df = measurement \
-        .select('person_id','measurement_date','measurement_concept_id','harmonized_value_as_number','value_as_concept_id') \
+        .select('person_id','measurement_date','measurement_concept_id','harmonized_value_as_number','value_as_concept_id','value_as_number') \
         .where(F.col('measurement_date').isNotNull()) \
         .withColumnRenamed('measurement_date','visit_date') \
         .join(persons,'person_id','inner')
@@ -1480,6 +1480,49 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     lowest_blood_UreaNitrogen = 3
     highest_blood_UreaNitrogen = 80
     
+    blood_Potassium_codeset_id=[3023103]  # normal people: 3.5-5.0 mEq/L
+    lowest_blood_Potassium = 1
+    highest_blood_Potassium = 30
+
+    blood_Chloride_codeset_id=[3014576]  # normal people: 96-106 mEq/L
+    lowest_blood_Chloride = 60
+    highest_blood_Chloride = 300
+    
+    blood_Calcium_codeset_id=[3006906]  # normal people: 8.5-10.2 mg/dL
+    lowest_blood_Calcium = 3
+    highest_blood_Calcium = 30
+
+    MCV_codeset_id=[3023599]  # normal people: 80-100 fl
+    lowest_MCV = 50
+    highest_MCV = 300
+
+    Erythrocytes_codeset_id=[3020416]  # normal people: 4-6 million cells per microliter 
+    lowest_Erythrocytes = 1
+    highest_Erythrocytes = 20
+
+    MCHC_codeset_id=[3009744]  # normal people: 31-37 g/dL 
+    lowest_MCHC = 10
+    highest_MCHC = 60
+
+    Systolic_blood_pressure_codeset_id=[3004249]   
+    lowest_Systolic_blood_pressure = 0
+    highest_Systolic_blood_pressure = 500
+
+    Diastolic_blood_pressure_codeset_id=[3012888,4154790]   
+    lowest_Diastolic_blood_pressure = 0
+    highest_Diastolic_blood_pressure = 500
+    
+    heart_rate_codeset_id=[3027018]  # normal people: 60-100 per min
+    lowest_heart_rate = 10
+    highest_heart_rate = 300
+
+    temperature_codeset_id=[3020891]  # normal people: 36-38
+    lowest_temperature = 35
+    highest_temperature = 43
+    
+    blood_Glucose_codeset_id=[3004501]  # normal people: 
+    lowest_blood_Glucose = 50
+    highest_blood_Glucose = 500
 
     bmi_codeset_ids = list(concepts_df.where(
         (concepts_df.concept_set_name=="body mass index") 
@@ -1535,6 +1578,40 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
 
     blood_UreaNitrogen_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
         .withColumn('blood_UreaNitrogen', F.when(df.measurement_concept_id.isin(blood_UreaNitrogen_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_UreaNitrogen, highest_blood_UreaNitrogen), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_Potassium_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Potassium', F.when(df.measurement_concept_id.isin(blood_Potassium_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Potassium, highest_blood_Potassium), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_Chloride_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Chloride', F.when(df.measurement_concept_id.isin(blood_Chloride_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Chloride, highest_blood_Chloride), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_Calcium_df =  df.where(F.col('value_as_number').isNotNull()) \
+        .withColumn('blood_Calcium', F.when(df.measurement_concept_id.isin(blood_Calcium_codeset_id) & df.value_as_number.between(lowest_blood_Calcium, highest_blood_Calcium), df.value_as_number).otherwise(0))
+    
+    MCV_df =  df.where(F.col('value_as_number').isNotNull()) \
+        .withColumn('MCV', F.when(df.measurement_concept_id.isin(MCV_codeset_id) & df.value_as_number.between(lowest_MCV, highest_MCV), df.value_as_number).otherwise(0))
+    
+    Erythrocytes_df =  df.where(F.col('value_as_number').isNotNull()) \
+        .withColumn('Erythrocytes', F.when(df.measurement_concept_id.isin(Erythrocytes_codeset_id) & df.value_as_number.between(lowest_Erythrocytes, highest_Erythrocytes), df.value_as_number).otherwise(0))
+    
+    MCHC_df =  df.where(F.col('value_as_number').isNotNull()) \
+        .withColumn('MCHC', F.when(df.measurement_concept_id.isin(MCHC_codeset_id) & df.value_as_number.between(lowest_MCHC, highest_MCHC), df.value_as_number).otherwise(0))
+    
+    ####
+    Systolic_blood_pressure_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('Systolic_blood_pressure', F.when(df.measurement_concept_id.isin(Systolic_blood_pressure_codeset_id) & df.harmonized_value_as_number.between(lowest_Systolic_blood_pressure, highest_Systolic_blood_pressure), df.harmonized_value_as_number).otherwise(0))
+    
+    Diastolic_blood_pressure_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('Diastolic_blood_pressure', F.when(df.measurement_concept_id.isin(Diastolic_blood_pressure_codeset_id) & df.harmonized_value_as_number.between(lowest_Diastolic_blood_pressure, highest_Diastolic_blood_pressure), df.harmonized_value_as_number).otherwise(0))
+
+    heart_rate_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('heart_rate', F.when(df.measurement_concept_id.isin(heart_rate_codeset_id) & df.harmonized_value_as_number.between(lowest_heart_rate, highest_heart_rate), df.harmonized_value_as_number).otherwise(0))
+
+    temperature_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('temperature', F.when(df.measurement_concept_id.isin(temperature_codeset_id) & df.harmonized_value_as_number.between(lowest_temperature, highest_temperature), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_Glucose_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Glucose', F.when(df.measurement_concept_id.isin(blood_Glucose_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Glucose, highest_blood_Glucose), df.harmonized_value_as_number).otherwise(0))
 
     labs_df = df.withColumn('PCR_AG_Pos', F.when(df.measurement_concept_id.isin(pcr_ag_test_ids) & df.value_as_concept_id.isin(covid_positive_measurement_ids), 1).otherwise(0)) \
         .withColumn('PCR_AG_Neg', F.when(df.measurement_concept_id.isin(pcr_ag_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0)) \
@@ -1578,6 +1655,50 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     F.max('blood_UreaNitrogen').alias('blood_UreaNitrogen')
     )
 
+    blood_Potassium_df = blood_Potassium_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Potassium').alias('blood_Potassium')
+    )
+
+    blood_Chloride_df = blood_Chloride_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Chloride').alias('blood_Chloride')
+    )
+
+    blood_Calcium_df = blood_Calcium_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Calcium').alias('blood_Calcium')
+    )
+
+    MCV_df = MCV_df.groupby('person_id', 'visit_date').agg(
+    F.max('MCV').alias('MCV')
+    )
+
+    Erythrocytes_df = Erythrocytes_df.groupby('person_id', 'visit_date').agg(
+    F.max('Erythrocytes').alias('Erythrocytes')
+    )
+
+    MCHC_df = MCHC_df.groupby('person_id', 'visit_date').agg(
+    F.max('MCHC').alias('MCHC')
+    )
+    ###
+    Systolic_blood_pressure_df = Systolic_blood_pressure_df.groupby('person_id', 'visit_date').agg(
+    F.max('Systolic_blood_pressure').alias('Systolic_blood_pressure')
+    )
+
+    Diastolic_blood_pressure_df = Diastolic_blood_pressure_df.groupby('person_id', 'visit_date').agg(
+    F.max('Diastolic_blood_pressure').alias('Diastolic_blood_pressure')
+    )
+
+    heart_rate_df = heart_rate_df.groupby('person_id', 'visit_date').agg(
+    F.max('heart_rate').alias('heart_rate')
+    )
+
+    temperature_df = temperature_df.groupby('person_id', 'visit_date').agg(
+    F.max('temperature').alias('temperature')
+    )
+    
+    blood_Glucose_df = blood_Glucose_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Glucose').alias('blood_Glucose')
+    )
+
     #add a calculated BMI for each visit date when height and weight available.  Note that if only one is available, it will result in zero
     #subsequent filter out rows that would have resulted from unreasonable calculated_BMI being used as best_BMI for the visit 
     BMI_df = BMI_df.withColumn('calculated_BMI', (BMI_df.weight/(BMI_df.height*BMI_df.height)))
@@ -1589,7 +1710,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     BMI_df = BMI_df.withColumn('OBESITY', F.when(BMI_df.BMI_rounded>=30, 1).otherwise(0))
 
     #join BMI_df with labs_df to retain all lab results with only reasonable BMI_rounded and OBESITY flags
-    df = labs_df.join(BMI_df, on=['person_id', 'visit_date'], how='left').join(blood_oxygen_df, on=['person_id', 'visit_date'], how='left').join(blood_sodium_df, on=['person_id', 'visit_date'], how='left').join(blood_hemoglobin_df, on=['person_id', 'visit_date'], how='left').join(respiratory_rate_df, on=['person_id', 'visit_date'], how='left').join(blood_Creatinine_df, on=['person_id', 'visit_date'], how='left').join(blood_UreaNitrogen_df, on=['person_id', 'visit_date'], how='left')
+    df = labs_df.join(BMI_df, on=['person_id', 'visit_date'], how='left').join(blood_oxygen_df, on=['person_id', 'visit_date'], how='left').join(blood_sodium_df, on=['person_id', 'visit_date'], how='left').join(blood_hemoglobin_df, on=['person_id', 'visit_date'], how='left').join(respiratory_rate_df, on=['person_id', 'visit_date'], how='left').join(blood_Creatinine_df, on=['person_id', 'visit_date'], how='left').join(blood_UreaNitrogen_df, on=['person_id', 'visit_date'], how='left').join(blood_Potassium_df, on=['person_id', 'visit_date'], how='left').join(blood_Chloride_df, on=['person_id', 'visit_date'], how='left').join(blood_Calcium_df, on=['person_id', 'visit_date'], how='left').join(MCV_df, on=['person_id', 'visit_date'], how='left').join(Erythrocytes_df, on=['person_id', 'visit_date'], how='left').join(MCHC_df, on=['person_id', 'visit_date'], how='left').join(Systolic_blood_pressure_df, on=['person_id', 'visit_date'], how='left').join(Diastolic_blood_pressure_df, on=['person_id', 'visit_date'], how='left').join(heart_rate_df, on=['person_id', 'visit_date'], how='left').join(temperature_df, on=['person_id', 'visit_date'], how='left').join(blood_Glucose_df, on=['person_id', 'visit_date'], how='left')
 
     return df
 
