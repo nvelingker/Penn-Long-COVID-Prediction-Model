@@ -2312,6 +2312,49 @@ def recent_visits_w_nlp_notes(recent_visits, person_nlp_symptom):
     return df
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.235be874-5669-4c42-9ae3-3e6d37b645e1"),
+    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
+    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
+    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
+    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
+    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3"),
+    train_test_model=Input(rid="ri.foundry.main.dataset.ea6c836a-9d51-4402-b1b7-0e30fb514fc8")
+)
+def study_misclassified(train_test_model, procedure_occurrence, condition_occurrence, drug_exposure, observation, device_exposure):
+    tables = {procedure_occurrence:"procedure_concept_name",condition_occurrence:"condition_concept_name", drug_exposure:"drug_concept_name", observation:"observation_concept_name", device_exposure:"device_concept_name"}
+    top_k = 1
+    
+    ret_tables = []
+    for TABLE, CONCEPT_NAME_COL in tables.items():
+        TABLE = TABLE.join(train_test_model, "person_id").filter((F.col(CONCEPT_NAME_COL) != "No matching concept") & (F.col("ens_outcome") != F.col("outcome"))).select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome"))
+        distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(top_k).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
+        
+        pos, count = [], []
+        cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
+        print(len(distinct))
+        t = time.time()
+        for cname in distinct:
+            f = TABLE.agg(
+                cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
+                cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1))
+            ).collect()
+            one_count = f[0][1]
+            size = f[0][0]
+            pos.append(one_count/size)
+            count.append(size)
+        print(time.time() - t)
+        r = pd.DataFrame(list(zip(distinct,pos, count)), columns=["concept_name","pos", "count"])
+        r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
+        r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+        r['domain'] = CONCEPT_NAME_COL
+        r["heuristic"] = r.apply(lambda row: row["maximum"] * row["count"] if row["maximum"] > 0.7 else 0, axis=1)
+        r =r[["concept_name", 'domain', 'pos','neg','maximum','count','heuristic']]
+        ret_tables.append(r)
+    ret =  pd.concat(ret_tables)
+    return ret
+    
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.133d515d-3a27-46b1-acbe-749a21a788e9"),
     condition_table_analysis=Input(rid="ri.foundry.main.dataset.bcbf4137-1508-42b5-bb05-631492b8d3b9"),
     device_table_analysis_1=Input(rid="ri.foundry.main.dataset.ffc3d120-eaa8-4a04-8bcb-69b6dcb16ad8"),
@@ -2429,6 +2472,8 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     }, orient='columns')
     
     test_predictions = test_predictions.merge(Outcome_df, on="person_id", how="left")
+    outcomes = ['lr_outcome', 'lr2_outcome', 'rf_outcome', 'gb_outcome', 'nn_outcome']
+    test_predictions['ens_outcome'] = test_predictions.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
 
     # predictions = pd.DataFrame.from_dict({
     #     'person_id': list(all_patients_summary_fact_table_de_id_testing["person_id"]),
@@ -2469,5 +2514,6 @@ def validation_metrics( train_test_model):
     print("RF Classification Report:\n{}".format(classification_report(df["outcome"], df["rf_outcome"])))
     print("GB Classification Report:\n{}".format(classification_report(df["outcome"], df["gb_outcome"])))
     print("NN Classification Report:\n{}".format(classification_report(df["outcome"], df["nn_outcome"])))
+    print("Ensemble Classification Report:\n{}".format(classification_report(df["outcome"], df["ens_outcome"])))
     return df
 
