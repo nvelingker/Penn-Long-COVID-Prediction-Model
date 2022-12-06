@@ -2322,7 +2322,7 @@ def recent_visits_w_nlp_notes(recent_visits, person_nlp_symptom):
 )
 def study_misclassified(train_test_model, procedure_occurrence, condition_occurrence, drug_exposure, observation, device_exposure):
     tables = {procedure_occurrence:"procedure_concept_name",condition_occurrence:"condition_concept_name", drug_exposure:"drug_concept_name", observation:"observation_concept_name", device_exposure:"device_concept_name"}
-    top_k = 1
+    top_k = 100
     
     ret_tables = []
     for TABLE, CONCEPT_NAME_COL in tables.items():
