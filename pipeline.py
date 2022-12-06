@@ -506,6 +506,8 @@ def custom_concept_set_members(concept_set_members):
         ["40170911", "liraglutide", "liraglutide"],
         ["4185623", "Fall risk assessment", "fall_risk_assessment_penn"],
         ["43018325", "Performance of Urinary Filtration, Continuous, Greater than 18 hours Per Day", "urinary_filtration_penn"]
+        ["3661408", "Pneumonia caused by SARS-CoV-2", "pneumonia_penn"],
+        ["42538827", "Uses contraception", "contraception_penn"]
     ]
     #
     #codeset_id, concept_id, concept_set_name, is_most_recent (true),version (1), concept_name, archived (false)
@@ -538,7 +540,6 @@ def custom_sets(LL_concept_sets_fusion_everyone):
     df.loc[len(df.index)] = ['anosmia-broad', 'ANOSMIA', 'condition,observation']
     df.loc[len(df.index)] = ['systemic steroids ITM', 'STEROIDS', 'drug']
     df.loc[len(df.index)] = ['prednisone, prednisolone, methylprednisolone, dexamethasone', 'PREDNISONE', 'drug']
-    df.loc[len(df.index)] = ['UIowa - COVID pneumonia', 'LL_PNEUMONIADUETOCOVID', 'condition,observation']
     df.loc[len(df.index)] = ['ARIScience - Respiratory Disorder - JA', 'RESPIRATORY', 'condition,observation']
     df.loc[len(df.index)] = ['ARIScience - Lung Disorder - JA', 'RESPIRATORY', 'condition,observation']
     df.loc[len(df.index)] = ['dexamethasone', 'DEXAMETHASONE', 'drug']
@@ -551,7 +552,8 @@ def custom_sets(LL_concept_sets_fusion_everyone):
     df.loc[len(df.index)] = ['empagliflozin_penn', 'empagliflozin', 'drug']
     df.loc[len(df.index)] = ['fall_risk_assessment_penn', 'FALL_RISK', 'procedure']
     df.loc[len(df.index)] = ['urinary_filtration_penn', 'URINARY_FILTRATION', 'procedure']
-    
+    df.loc[len(df.index)] = ['pneumonia_penn', 'pneumonia', 'condition']
+    df.loc[len(df.index)] = ['contraception_penn', 'contraception', 'condition']
     
 
     print(df)
