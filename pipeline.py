@@ -514,7 +514,7 @@ def custom_concept_set_members(concept_set_members):
         ["4185623", "Fall risk assessment", "fall_risk_assessment_penn"],
         ["43018325", "Performance of Urinary Filtration, Continuous, Greater than 18 hours Per Day", "urinary_filtration_penn"]
         ["3661408", "Pneumonia caused by SARS-CoV-2", "pneumonia_penn"],
-        ["42538827", "Uses contraception", "contraception_penn"]
+        ["42538827", "Uses contraception", "contraception_penn"],
         ["43018325", "Performance of Urinary Filtration, Continuous, Greater than 18 hours Per Day", "urinary_filtration_penn"],
         ["21494995", "Pain assessment [Interpretation]", "pain_assessment_penn"],
         ["3035482", "Pain duration - Reported", "pain_duration_penn"],
