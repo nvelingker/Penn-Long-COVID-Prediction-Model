@@ -2610,7 +2610,7 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     print("rfc important features:", [cols[1:][int(i)] for i in rfc_sort_features])
 
     nn_scaler = StandardScaler().fit(X_train)
-    nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(2, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
+    nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
 
     #preds = clf.predict_proba(Testing)[:,1]
 
