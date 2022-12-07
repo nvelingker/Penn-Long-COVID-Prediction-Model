@@ -315,6 +315,7 @@ def all_patients_summary_fact_table_de_id_testing(all_patients_visit_day_facts_t
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.ace57213-685a-4f18-a157-2b02b41086be"),
+    Person_top_nlp_symptom=Input(rid="ri.foundry.main.dataset.74827f05-58fb-4281-aed4-4da6f728b448"),
     everyone_conditions_of_interest=Input(rid="ri.foundry.main.dataset.514f3fe8-7565-4701-8982-174b43937006"),
     everyone_devices_of_interest=Input(rid="ri.foundry.main.dataset.15ddf371-0d59-4397-9bee-866c880620cf"),
     everyone_drugs_of_interest=Input(rid="ri.foundry.main.dataset.32bad30b-9322-4e6d-8a88-ab5133e98543"),
@@ -329,7 +330,7 @@ def all_patients_summary_fact_table_de_id_testing(all_patients_visit_day_facts_t
 #Last Update - 7/8/22
 #Description - All facts collected in the previous steps are combined in this cohort_all_facts_table on the basis of unique visit days for each patient. Indicators are created for the presence or absence of events, medications, conditions, measurements, device exposures, observations, procedures, and outcomes.  It also creates an indicator for whether the visit date where a fact was noted occurred during any hospitalization. This table is useful if the analyst needs to use actual dates of events as it provides more detail than the final patient-level table.  Use the max and min functions to find the first and last occurrences of any events.
 
-def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, everyone_measurements_of_interest, everyone_procedures_of_interest, everyone_observations_of_interest, everyone_drugs_of_interest, everyone_devices_of_interest, microvisits_to_macrovisits, everyone_vaccines_of_interest):
+def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, everyone_measurements_of_interest, everyone_procedures_of_interest, everyone_observations_of_interest, everyone_drugs_of_interest, everyone_devices_of_interest, microvisits_to_macrovisits, everyone_vaccines_of_interest, Person_top_nlp_symptom):
 
     macrovisits_df = microvisits_to_macrovisits
     vaccines_df = everyone_vaccines_of_interest
@@ -339,6 +340,11 @@ def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, ev
     conditions_df = everyone_conditions_of_interest
     drugs_df = everyone_drugs_of_interest
     measurements_df = everyone_measurements_of_interest
+    # nlp_symptom_df = Person_top_nlp_symptom \
+    #     .withColumnRenamed("note_date", "visit_date") \
+    #     .withColumnRenamed("Palpitations", "PALPITATIONS_NOTE") \
+    #     .drop("note_id") \
+    #     .drop("visit_occurrence_id")
 
     df = macrovisits_df.select('person_id','visit_start_date').withColumnRenamed('visit_start_date','visit_date')
     df = df.join(vaccines_df, on=list(set(df.columns)&set(vaccines_df.columns)), how='outer')
@@ -348,6 +354,7 @@ def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, ev
     df = df.join(conditions_df, on=list(set(df.columns)&set(conditions_df.columns)), how='outer')
     df = df.join(drugs_df, on=list(set(df.columns)&set(drugs_df.columns)), how='outer')
     df = df.join(measurements_df, on=list(set(df.columns)&set(measurements_df.columns)), how='outer')
+    # df = df.join(nlp_symptom_df, on=list(set(df.columns)&set(nlp_symptom_df.columns)), how='outer')
     
     df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
    
@@ -503,11 +510,27 @@ def custom_concept_set_members(concept_set_members):
         ["19127775","prednisone 5 MG Oral Capsule", "predisone_penn"],
         ["19078925","midazolam 5 MG/ML Injectable Solution", "midazolam_penn"],
         ["45774751","empagliflozin", "empagliflozin_penn"],
-        ["40170911", "liraglutide", "liraglutide"],
+        ["40170911", "liraglutide", "liraglutide_penn"],
         ["4185623", "Fall risk assessment", "fall_risk_assessment_penn"],
         ["43018325", "Performance of Urinary Filtration, Continuous, Greater than 18 hours Per Day", "urinary_filtration_penn"]
         ["3661408", "Pneumonia caused by SARS-CoV-2", "pneumonia_penn"],
         ["42538827", "Uses contraception", "contraception_penn"]
+        ["43018325", "Performance of Urinary Filtration, Continuous, Greater than 18 hours Per Day", "urinary_filtration_penn"],
+        ["21494995", "Pain assessment [Interpretation]", "pain_assessment_penn"],
+        ["3035482", "Pain duration - Reported", "pain_duration_penn"],
+        ["4271661", "Characteristic of pain", "characteristic_pain_penn"],
+        ["1367500", "losartan", "losartan_penn"],
+        ["19011093", "tenofovir", "tenofovir_penn"],
+        ["903963", "triamcinolone", "triamcinolone_penn"],
+        ["1593467", "dupilumab", "dupilumab_penn"],
+        ["1336926", "tadalafil", "tadalafil_penn"],
+        ["19014878", "azathioprine", "azathioprine_penn"],
+        ["1367571", "heparin", "heparin_penn"],
+        ["1112921", "ipratropium", "ipratropium_penn"],
+        ["798875", "clonazepam 0.5 MG Oral Tablet", "clonazepam_penn"],
+        ["42538117", "Transplanted heart present", "transplanted_heart_penn"],
+        ["713823", "ropinirole", "ropinirole_penn"],
+        ["19045045", "ergocalciferol", "ergocalciferol_penn"],
     ]
     #
     #codeset_id, concept_id, concept_set_name, is_most_recent (true),version (1), concept_name, archived (false)
@@ -555,6 +578,21 @@ def custom_sets(LL_concept_sets_fusion_everyone):
     df.loc[len(df.index)] = ['pneumonia_penn', 'pneumonia', 'condition']
     df.loc[len(df.index)] = ['contraception_penn', 'contraception', 'condition']
     
+    df.loc[len(df.index)] = ['pain_assessment_penn', 'PAIN_ASSESSMENT', 'observation']
+    df.loc[len(df.index)] = ["pain_duration_penn", "PAIN_DURATION", "observation"]
+    df.loc[len(df.index)] = ["characteristic_pain_penn", "PAIN_CHARACTERISTIC", "observation"]
+    df.loc[len(df.index)] = ["losartan_penn", "LOSARTAN", "drug"]
+    df.loc[len(df.index)] = ["tenofovir_penn", "TENOFOVIR", "drug"]
+    df.loc[len(df.index)] = ["triamcinolone_penn", "TRIAMCINOLONE", "drug"]
+    df.loc[len(df.index)] = ["dupilumab_penn", "DUPILUMAB", "drug"]
+    df.loc[len(df.index)] = ["tadalafil_penn", "TADALAFIL", "drug"]
+    df.loc[len(df.index)] = ["azathioprine_penn", "AZATHIOPRINE", "drug"]
+    df.loc[len(df.index)] = ["heparin_penn", "HEPARIN", "drug"]
+    df.loc[len(df.index)] = ["ipratropium_penn", "IPRATROPIUM", "drug"]
+    df.loc[len(df.index)] = ["clonazepam_penn", "CLONEAZEPAM", "drug"]
+    df.loc[len(df.index)] = ["transplanted_heart_penn", "TRANSPLANTED_HEART", "condition"]
+    df.loc[len(df.index)] = ["ropinirole_penn", "ROPINIROLE", "drug"]
+    df.loc[len(df.index)] = ["ergocalciferol_penn", "ERGOCALCIFEROL", "drug"]
 
     print(df)
     return df
@@ -1144,7 +1182,7 @@ def everyone_conditions_of_interest(everyone_cohort_de_id, condition_occurrence,
     #filter concept set members table to only concept ids for the conditions of interest
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
-        .where((F.col('is_most_recent_version')=='true') | (F.col('concept_set_name') == 'Long-COVID (PASC)')) \
+        .where((F.col('is_most_recent_version')=='true') | (F.col('concept_set_name') == 'Long-COVID (PASC)') | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix')
 
@@ -1245,7 +1283,7 @@ def everyone_devices_of_interest(device_exposure, everyone_cohort_de_id, customi
     #filter concept set members table to only concept ids for the devices of interest
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
-        .where(F.col('is_most_recent_version')=='true') \
+        .where((F.col('is_most_recent_version')=='true')  | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix')
         
@@ -1348,9 +1386,9 @@ def everyone_drugs_of_interest( drug_exposure, everyone_cohort_de_id, customized
     #filter concept set members table to only concept ids for the drugs of interest
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
-        .where(F.col('is_most_recent_version')=='true') \
+        .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
-        .select('concept_id','indicator_prefix')
+        .select('concept_id','indicator_prefix', 'concept_set_name')
         
     #find drug exposure information based on matching concept ids for drugs of interest
     df = drug_df.join(concepts_df, 'concept_id', 'inner')
@@ -1446,7 +1484,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
         
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
-        .where(F.col('is_most_recent_version')=='true')
+        .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True))
           
     #Find BMI closest to COVID using both reported/observed BMI and calculated BMI using height and weight.  Cutoffs for reasonable height, weight, and BMI are provided and can be changed by the template user.
     lowest_acceptable_BMI = 10
@@ -1858,7 +1896,7 @@ def everyone_observations_of_interest(observation, everyone_cohort_de_id, custom
     #filter concept set members table to only concept ids for the observations of interest
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
-        .where(F.col('is_most_recent_version')=='true') \
+        .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix')
 
@@ -1946,7 +1984,7 @@ def everyone_procedures_of_interest(everyone_cohort_de_id, procedure_occurrence,
     #filter concept set members table to only concept ids for the procedures of interest
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
-        .where(F.col('is_most_recent_version')=='true') \
+        .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix')
  
@@ -2572,7 +2610,7 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     print("rfc important features:", [cols[1:][int(i)] for i in rfc_sort_features])
 
     nn_scaler = StandardScaler().fit(X_train)
-    nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
+    nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(64, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
 
     #preds = clf.predict_proba(Testing)[:,1]
 
