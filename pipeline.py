@@ -531,6 +531,14 @@ def custom_concept_set_members(concept_set_members):
         ["42538117", "Transplanted heart present", "transplanted_heart_penn"],
         ["713823", "ropinirole", "ropinirole_penn"],
         ["19045045", "ergocalciferol", "ergocalciferol_penn"],
+        ["1154343", "albuterol", "albuterol_penn"],
+        ["19095164", "cholecalciferol", "cholecalciferol_penn"],
+        ["1149380", "fluticasone", "fluticasone_penn"],
+        ["753626", "propofol", "propofol_penn"],
+        ["950637", "tacrolimus", "tacrolimus_penn"],
+        ["975125", "hydrocortisone", "hydrocortisone_penn"],
+        ["1308738", "vitamin B12", "B12_penn"],
+        ["1136601", "benzonatate", "benzonatate_penn"],
     ]
     #
     #codeset_id, concept_id, concept_set_name, is_most_recent (true),version (1), concept_name, archived (false)
@@ -577,6 +585,14 @@ def custom_sets(LL_concept_sets_fusion_everyone):
     df.loc[len(df.index)] = ['urinary_filtration_penn', 'URINARY_FILTRATION', 'procedure']
     df.loc[len(df.index)] = ['pneumonia_penn', 'pneumonia', 'condition']
     df.loc[len(df.index)] = ['contraception_penn', 'contraception', 'condition']
+
+    df.loc[len(df.index)] = ["albuterol_penn", "ALBUTEROL", "drug"]
+    df.loc[len(df.index)] = ["cholecalciferol_penn", "CHOLECALCIFEROL", "drug"]
+    df.loc[len(df.index)] = ["propofol_penn", "PROPOFOL", "drug"]
+    df.loc[len(df.index)] = ["tacrolimus_penn", "TACROLIMUS", "drug"]
+    df.loc[len(df.index)] = ["hydrocortisone_penn", "HYDROCORTISONE", "drug"]
+    df.loc[len(df.index)] = ["B12_penn", "VITAMIN_B12", "drug"]
+    df.loc[len(df.index)] = ["benzonatate_penn", "BENZONATATE", "drug"]
     
     df.loc[len(df.index)] = ['pain_assessment_penn', 'PAIN_ASSESSMENT', 'observation']
     df.loc[len(df.index)] = ["pain_duration_penn", "PAIN_DURATION", "observation"]
@@ -2670,10 +2686,15 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     #preds = clf.predict_proba(Testing)[:,1]
 
     lr_test_preds = lrc.predict(X_test)
+    lr_train_preds = lrc.predict(X_train)
     lr2_test_preds = lrc2.predict(X_test)
     rf_test_preds = rfc.predict(X_test)
+    rf_train_preds = rfc.predict(X_train)
     gb_test_preds = gbc.predict(X_test)
     nnc_test_preds = nnc.predict(nn_scaler.transform(X_test))
+
+    print("RF Training Classification Report:\n{}".format(classification_report(y_train, rf_train_preds)))
+    print("LR Training Classification Report:\n{}".format(classification_report(y_train, lr_train_preds)))
 
     #test_df = 
     test_predictions = pd.DataFrame.from_dict({
