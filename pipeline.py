@@ -2331,6 +2331,7 @@ def everyone_drugs_of_interest( drug_exposure, everyone_cohort_de_id, customized
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0) \
         .join(first_covid_positive, 'person_id', 'leftouter') \
         .withColumn('BEFORE_FCP', F.when(F.datediff(F.col('visit_date'), F.col('first_covid_positive')) < 0, 1).otherwise(0)) \
+        .withColumn('DAYS_SINCE_FCP', F.datediff(F.col('visit_date'), F.col('first_covid_positive'))) \
         .drop(F.col('first_covid_positive'))
 
     return df
@@ -2385,6 +2386,7 @@ def everyone_drugs_of_interest_testing( drug_exposure_testing, everyone_cohort_d
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0) \
         .join(first_covid_positive_testing, 'person_id', 'leftouter') \
         .withColumn('BEFORE_FCP', F.when(F.datediff(F.col('visit_date'), F.col('first_covid_positive')) < 0, 1).otherwise(0)) \
+        .withColumn('DAYS_SINCE_FCP', F.datediff(F.col('visit_date'), F.col('first_covid_positive'))) \
         .drop(F.col('first_covid_positive'))
 
     return df
@@ -3086,6 +3088,7 @@ def everyone_vaccines_of_interest(everyone_cohort_de_id, Vaccine_fact_de_identif
     df = df.withColumn('had_vaccine_administered', F.lit(1)) \
         .join(first_covid_positive, 'person_id', 'leftouter') \
         .withColumn('vax_before_FCP', F.when(F.datediff(F.col('visit_date'), F.col('first_covid_positive')) < 0, 1).otherwise(0)) \
+        .withColumn('VAX_DAYS_SINCE_FCP', F.datediff(F.col('visit_date'), F.col('first_covid_positive'))) \
         .drop(F.col('first_covid_positive'))
 
     return df
@@ -3137,6 +3140,7 @@ def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine
     df = df.withColumn('had_vaccine_administered', F.lit(1)) \
         .join(first_covid_positive_testing, 'person_id', 'leftouter') \
         .withColumn('vax_before_FCP', F.when(F.datediff(F.col('visit_date'), F.col('first_covid_positive')) < 0, 1).otherwise(0)) \
+        .withColumn('VAX_DAYS_SINCE_FCP', F.datediff(F.col('visit_date'), F.col('first_covid_positive'))) \
         .drop(F.col('first_covid_positive'))
 
     return df
