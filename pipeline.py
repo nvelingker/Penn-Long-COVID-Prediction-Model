@@ -2,6 +2,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import IntegerType
 from pyspark.sql import Window
 from pyspark.sql import SparkSession
+from pyspark.sql.functions import col,lit
 import pandas as pd
 import sklearn
 import scipy
@@ -69,6 +70,32 @@ def remove_empty_columns(values, masks):
         full_mask += torch.sum(mask, dim=0)
 
     non_empty_column_ids = (full_mask > 0).view(-1)
+
+    updated_values = []
+
+    updated_masks = []
+
+    for idx in range(len(values)):
+        
+        mask = masks[idx]
+        val = values[idx]
+
+        updated_values.append(val[:, non_empty_column_ids])
+        updated_masks.append(mask[:, non_empty_column_ids])
+
+    return updated_values, updated_masks, non_empty_column_ids
+
+def remove_empty_columns_with_non_empty_cls(values, masks, non_empty_column_ids):
+
+    # full_mask = 0
+
+    # for idx in range(len(values)):
+        
+    #     mask = masks[idx]
+
+    #     full_mask += torch.sum(mask, dim=0)
+
+    # non_empty_column_ids = (full_mask > 0).view(-1)
 
     updated_values = []
 
@@ -276,23 +303,19 @@ def variable_time_collate_fn(tt_ls, val_ls, mask_ls, labels_ls, device=torch.dev
     #     return combined_data
 
 def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setup="both"):
-    # all_person_ids = person_ids["person_id"].unique()
     all_person_info = all_person_info.set_index("person_id")
     recent_visit = recent_visit.set_index(["person_id", "visit_date"])
     label = label.set_index("person_id")
-    all_person_ids = list(all_person_info.index)
+    all_person_ids = list(all_person_info.index.unique())
+
+    # all_person_ids = list(all_person_info.index.unique())
     visit_tensor_ls = []
     mask_ls= []
     time_step_ls=[]
     person_info_ls = []
     label_tensor_ls = []
-
-    print("person id count::", len(all_person_ids))
-
-    person_count = 0
-
+    person_count=0
     for person_id in all_person_ids:
-        
         person_info = all_person_info.loc[person_id]
         person_info_tensor = torch.tensor([
             person_info["normalized_age"], 
@@ -300,27 +323,23 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
             person_info["is_female"], 
             person_info["is_other_gender"]
         ])
-        # print("recent_visit shape:", recent_visit.shape)
         visits = recent_visit.loc[person_id]
         visit_tensors = []
         time_steps = []
-        # print("person_id::", person_id)
-        # print(visits)
-        # for i in range(len(visits)):
-        #     visit = visits.iloc[i]
-        #     # visit_tensor = torch.tensor([visit["diff_date"] / 180] + list(visit[5:]))
-        #     visit_tensor = list(visit[5:-1])
-        #     # print(visit)
-        #     time_steps.append(visit["diff_days"])
-        #     visit_tensors.append(torch.tensor(visit_tensor))
-        # visits_tensor = torch.stack(visit_tensors)
 
-        # mask = (~torch.isnan(visits_tensor)).float()
+        visits_tensor2 = torch.from_numpy(np.array(visits.iloc[:,5:-1].values.tolist()))
+        time_steps2 = torch.from_numpy(np.array(visits["diff_days"].values.tolist()))
+        for i in range(len(visits)):
+            visit = visits.iloc[i]
+            # visit_tensor = torch.tensor([visit["diff_date"] / 180] + list(visit[5:]))
+            visit_tensor = list(visit[5:-1])
+            time_steps.append(visit["diff_days"])
+            visit_tensors.append(torch.tensor(visit_tensor))
+        visits_tensor = torch.stack(visit_tensors)
 
-        # time_steps = torch.tensor(time_steps)
-        visits_tensor = torch.from_numpy(np.array(visits.iloc[:,5:-1].values.tolist()))
-        time_steps = torch.from_numpy(np.array(visits["diff_days"].values.tolist()))
         mask = (~torch.isnan(visits_tensor)).float()
+
+        time_steps = torch.tensor(time_steps)
 
         # Obtain the label
         label_row = label.loc[person_id]
@@ -337,12 +356,103 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
         mask_ls.append(mask)
         time_step_ls.append(time_steps)
         person_info_ls.append(person_info_tensor)
-
-        person_count += 1
+        person_count +=1
         if person_count %10000 == 0:
             print("person count::", person_count)
-    print("pre_processing person done!!!")
+
     return visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls
+# def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setup="both"):
+#     # all_person_ids = person_ids["person_id"].unique()
+    
+    
+#     # all_person_info = all_person_info.set_index("person_id")
+#     # recent_visit = recent_visit.set_index(["person_id", "visit_date"])
+#     # label = label.set_index("person_id")
+#     # all_person_ids = list(all_person_info.index)
+
+#     all_person_ids = list(all_person_info.select("person_id").distinct().toPandas()["person_id"])
+
+#     visit_tensor_ls = []
+#     mask_ls= []
+#     time_step_ls=[]
+#     person_info_ls = []
+#     label_tensor_ls = []
+
+#     print("person id count::", len(all_person_ids))
+
+#     person_count = 0
+
+#     for person_id in all_person_ids:
+        
+#         # person_info = all_person_info.loc[person_id]
+#         person_info = all_person_info.where(all_person_info["person_id"]==person_id)
+#         person_info_tensor = torch.tensor([
+#             list(person_info.select("normalized_age").toPandas()["normalized_age"]), 
+#             list(person_info.select("is_male").toPandas()["is_male"]),
+#             list(person_info.select("is_female").toPandas()["is_female"]),
+#             list(person_info.select("is_other_gender").toPandas()["is_other_gender"])
+#             # person_info["is_male"], 
+#             # person_info["is_female"], 
+#             # person_info["is_other_gender"]
+#         ])
+#         # print("recent_visit shape:", recent_visit.shape)
+#         # visits = recent_visit.loc[person_id]
+#         visits = recent_visit.where(recent_visit["person_id"]==person_id)
+#         visit_tensors = []
+#         time_steps = []
+#         # print("person_id::", person_id)
+#         # print(visits)
+#         # for i in range(len(visits)):
+#         #     visit = visits.iloc[i]
+#         #     # visit_tensor = torch.tensor([visit["diff_date"] / 180] + list(visit[5:]))
+#         #     visit_tensor = list(visit[5:-1])
+#         #     # print(visit)
+#         #     time_steps.append(visit["diff_days"])
+#         #     visit_tensors.append(torch.tensor(visit_tensor))
+#         # visits_tensor = torch.stack(visit_tensors)
+
+#         # mask = (~torch.isnan(visits_tensor)).float()
+
+#         # time_steps = torch.tensor(time_steps)
+#         selected_column_names = visits.columns[6:-1]
+#         # print("column types::", visits.dtypes[6:-1])
+#         # print("selected_column names::", selected_column_names)
+#         # print(visits.select(selected_column_names).toPandas())
+#         numpy_arr = np.array((visits.select(selected_column_names).toPandas().values.tolist()))
+#         # print("numpy_arr::", numpy_arr)
+#         visits_tensor = torch.from_numpy(numpy_arr)
+#         # print("tensor shape::", visits_tensor.shape)
+#         time_steps = torch.from_numpy(np.array(list(visits.select("diff_days").toPandas()["diff_days"])))
+#         # visits_tensor = torch.from_numpy(np.array(visits.iloc[:,5:-1].values.tolist()))
+#         # time_steps = torch.from_numpy(np.array(visits["diff_days"].values.tolist()))
+#         mask = (~torch.isnan(visits_tensor)).float()
+
+#         # Obtain the label
+#         # label_row = label.loc[person_id]
+#         label_row = label.where(label["person_id"] == person_id)
+#         if setup == "prior":
+#             label_tensor = torch.tensor(list(label_row.select("pasc_code_prior_four_weeks").toPandas()["pasc_code_prior_four_weeks"]))
+#         elif setup == "after":
+#             label_tensor = torch.tensor(list(label_row.select("pasc_code_after_four_weeks").toPandas()["pasc_code_after_four_weeks"]))
+#         elif setup == "both":
+#             label1 = list(label_row.select("pasc_code_prior_four_weeks").toPandas()["pasc_code_prior_four_weeks"])
+#             label2 = list(label_row.select("pasc_code_after_four_weeks").toPandas()["pasc_code_after_four_weeks"])
+#             label_ls = list(map(max, zip(label1, label2)))
+#             label_tensor = torch.tensor(label_ls)
+#             # label_tensor = torch.tensor(max(label_row.select("pasc_code_after_four_weeks"), label_row.select("pasc_code_prior_four_weeks")))
+#         else:
+#             raise Exception(f"Unknown setup `{setup}`")
+#         label_tensor_ls.append(label_tensor)
+#         visit_tensor_ls.append(visits_tensor)
+#         mask_ls.append(mask)
+#         time_step_ls.append(time_steps)
+#         person_info_ls.append(person_info_tensor)
+
+#         person_count += 1
+#         if person_count %10000 == 0:
+#             print("person count::", person_count)
+#     print("pre_processing person done!!!")
+#     return visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls
 
 class multiTimeAttention(nn.Module):
     
@@ -3695,13 +3805,19 @@ def recent_visits_w_nlp_notes(recent_visits, person_nlp_symptom):
     recent_visits_2=Input(rid="ri.foundry.main.dataset.bf18056e-2e27-4f2a-af1a-7b6cabc2a9cf")
 )
 def recent_visits_w_nlp_notes_2(recent_visits_2, person_nlp_symptom):
-    person_nlp_symptom = person_nlp_symptom.merge(recent_visits_2[["person_id", "six_month_before_last_visit"]].drop_duplicates(), on="person_id", how="left")
-    person_nlp_symptom = person_nlp_symptom.loc[person_nlp_symptom["note_date"] >= person_nlp_symptom["six_month_before_last_visit"]]
-    person_nlp_symptom = person_nlp_symptom.rename(columns={"note_date": "visit_date"}).drop(columns=["six_month_before_last_visit", "note_id", "visit_occurrence_id"])
-    person_nlp_symptom["has_nlp_note"] = 1.0
+    person_nlp_symptom = person_nlp_symptom.join(recent_visits_2.select(["person_id", "six_month_before_last_visit"]).distinct(), on="person_id", how="left")
+    person_nlp_symptom = person_nlp_symptom.where(person_nlp_symptom["note_date"] >= person_nlp_symptom["six_month_before_last_visit"])
+    person_nlp_symptom = person_nlp_symptom.withColumnRenamed("note_date", "visit_date").drop(*["six_month_before_last_visit", "note_id", "visit_occurrence_id"])
+    person_nlp_symptom = person_nlp_symptom.withColumn("has_nlp_note", lit(1.0))
+    df = recent_visits_2.join(person_nlp_symptom, on = ["person_id", "visit_date"], how="left").orderBy(*["person_id", "visit_date"])
 
-    # Make sure type checks
-    df = recent_visits_2.merge(person_nlp_symptom, on=["person_id", "visit_date"], how="left").sort_values(["person_id", "visit_date"])#.fillna(0.0)
+    # person_nlp_symptom = person_nlp_symptom.merge(recent_visits_2[["person_id", "six_month_before_last_visit"]].drop_duplicates(), on="person_id", how="left")
+    # person_nlp_symptom = person_nlp_symptom.loc[person_nlp_symptom["note_date"] >= person_nlp_symptom["six_month_before_last_visit"]]
+    # person_nlp_symptom = person_nlp_symptom.rename(columns={"note_date": "visit_date"}).drop(columns=["six_month_before_last_visit", "note_id", "visit_occurrence_id"])
+    # person_nlp_symptom["has_nlp_note"] = 1.0
+
+    # # Make sure type checks
+    # df = recent_visits_2.merge(person_nlp_symptom, on=["person_id", "visit_date"], how="left").sort_values(["person_id", "visit_date"])#.fillna(0.0)
 
     return df
 
@@ -3913,22 +4029,33 @@ def train_sequential_model_2(train_valid_split, Long_COVID_Silver_Standard, pers
 def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
     print("start")
     # First get the splitted person ids
-    train_person_ids = train_valid_split.loc[train_valid_split["split"] == "train"]
-    valid_person_ids = train_valid_split.loc[train_valid_split["split"] == "valid"]
+    train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+
+    train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # print(train_recent_visits.show())
+
+    train_person_info = train_person_ids.join(person_information, on="person_id")
+    valid_person_info = valid_person_ids.join(person_information, on="person_id")
+    # train_person_ids = train_valid_split.loc[train_valid_split["split"] == "train"]
+    # valid_person_ids = train_valid_split.loc[train_valid_split["split"] == "valid"]
 
     # Use it to split the data into training x/y and validation x/y
-    train_recent_visits = train_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
-    valid_recent_visits = valid_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
-    train_labels = train_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
-    valid_labels = valid_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+    # train_recent_visits = train_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
+    # valid_recent_visits = valid_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
+    # train_labels = train_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
 
     # Basic person information
-    train_person_info = train_person_ids.merge(person_information, on="person_id")
-    valid_person_info = valid_person_ids.merge(person_information, on="person_id")
+    # train_person_info = train_person_ids.merge(person_information, on="person_id")
+    # valid_person_info = valid_person_ids.merge(person_information, on="person_id")
     
 
     print("start pre-processing!!!")
-    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids, train_person_info, train_recent_visits, train_labels, setup="both")
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids.toPandas(), train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both")
     # torch.save(visit_tensor_ls, "train_visit_tensor_ls")
     # torch.save(mask_ls, "train_mask_ls")
     # torch.save(time_step_ls, "train_mask_ls")
@@ -3937,9 +4064,10 @@ def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, pers
     
     # visit_tensor_ls, mask_ls = remove_empty_columns(visit_tensor_ls, mask_ls)
 
-    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids, valid_person_info, valid_recent_visits, valid_labels, setup="both")
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids.toPandas(), valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both")
     print("finish pre-processing!!!")
-    # visit_tensor_ls, mask_ls = remove_empty_columns(visit_tensor_ls, mask_ls)
+    visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
 
     data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
 
@@ -3950,8 +4078,8 @@ def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, pers
     # valid_dataset = LongCOVIDVisitsDataset2(valid_person_ids, valid_person_info, valid_recent_visits, valid_labels)
 
     # Construct dataloaders
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=16, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
-    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=16, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=32, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
 
     epochs=30
     print(train_dataset.__getitem__(1)[0])
