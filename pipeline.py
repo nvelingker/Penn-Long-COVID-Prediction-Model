@@ -1516,13 +1516,13 @@ def combined_study( study_misclassified, drug_table_analysis_1):
 def condition_table_analysis(condition_occurrence, Long_COVID_Silver_Standard):
     TABLE = condition_occurrence
     CONCEPT_NAME_COL = "condition_concept_name"
-    l, h = 0, 1000
+    l, h = 0, 750
 
     label = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
     TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
     distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
     
-    pos, count, ppl = [], [], []
+    pos, count, ppl, ppl_pos = [], [], [], []
     cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
     print(len(distinct))
     t = time.time()
@@ -1530,22 +1530,23 @@ def condition_table_analysis(condition_occurrence, Long_COVID_Silver_Standard):
         f = TABLE.agg(
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
-            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
+            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None)),
+            F.countDistinct(F.when(((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)), F.col("person_id")).otherwise(None)),
         ).collect()
         one_count = f[0][1]
         size = f[0][0]
         people_count =f[0][2]
+        people_one = f[0][3]
         pos.append(one_count/size)
         count.append(size)
         ppl.append(people_count)
+        ppl_pos.append(people_one/people_count)
     print(time.time() - t)
-    r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
-    r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
-    r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r = pd.DataFrame(list(zip(distinct,pos, count, ppl, ppl_pos)), columns=["concept_name","encounter_pos", "encounter_count", "people_count", "people_pos"])
     r['domain'] = CONCEPT_NAME_COL
-    r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
-    r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
-    r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
+    r["heuristic_count"] = r.apply(lambda row: row["encounter_pos"] * row["encounter_count"], axis=1)
+    r["heuristic_person"] = r.apply(lambda row: row["people_pos"] * row["people_count"], axis=1)
+    r =r[["concept_name", 'domain', 'encounter_pos','people_pos','encounter_count', 'people_count','heuristic_count','heuristic_person']]
     
     return r
 
@@ -1917,13 +1918,13 @@ def deduplicated_testing(distinct_vax_person_testing):
 def device_table_analysis_1(device_exposure, Long_COVID_Silver_Standard):
     TABLE = device_exposure
     CONCEPT_NAME_COL = "device_concept_name"
-    l, h = 0, 1000
+    l, h = 0, 750
 
     label = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
     TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
     distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
     
-    pos, count, ppl = [], [], []
+    pos, count, ppl, ppl_pos = [], [], [], []
     cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
     print(len(distinct))
     t = time.time()
@@ -1931,22 +1932,23 @@ def device_table_analysis_1(device_exposure, Long_COVID_Silver_Standard):
         f = TABLE.agg(
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
-            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
+            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None)),
+            F.countDistinct(F.when(((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)), F.col("person_id")).otherwise(None)),
         ).collect()
         one_count = f[0][1]
         size = f[0][0]
         people_count =f[0][2]
+        people_one = f[0][3]
         pos.append(one_count/size)
         count.append(size)
         ppl.append(people_count)
+        ppl_pos.append(people_one/people_count)
     print(time.time() - t)
-    r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
-    r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
-    r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r = pd.DataFrame(list(zip(distinct,pos, count, ppl, ppl_pos)), columns=["concept_name","encounter_pos", "encounter_count", "people_count", "people_pos"])
     r['domain'] = CONCEPT_NAME_COL
-    r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
-    r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
-    r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
+    r["heuristic_count"] = r.apply(lambda row: row["encounter_pos"] * row["encounter_count"], axis=1)
+    r["heuristic_person"] = r.apply(lambda row: row["people_pos"] * row["people_count"], axis=1)
+    r =r[["concept_name", 'domain', 'encounter_pos','people_pos','encounter_count', 'people_count','heuristic_count','heuristic_person']]
     
     return r
 
@@ -1958,13 +1960,13 @@ def device_table_analysis_1(device_exposure, Long_COVID_Silver_Standard):
 def drug_table_analysis_1(drug_exposure, Long_COVID_Silver_Standard):
     TABLE = drug_exposure
     CONCEPT_NAME_COL = "drug_concept_name"
-    l, h = 0, 1000
+    l, h = 0, 1
 
     label = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
     TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
     distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
     
-    pos, count, ppl = [], [], []
+    pos, count, ppl, ppl_pos = [], [], [], []
     cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
     print(len(distinct))
     t = time.time()
@@ -1972,22 +1974,23 @@ def drug_table_analysis_1(drug_exposure, Long_COVID_Silver_Standard):
         f = TABLE.agg(
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
-            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
+            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None)),
+            F.countDistinct(F.when(((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)), F.col("person_id")).otherwise(None)),
         ).collect()
         one_count = f[0][1]
         size = f[0][0]
         people_count =f[0][2]
+        people_one = f[0][3]
         pos.append(one_count/size)
         count.append(size)
         ppl.append(people_count)
+        ppl_pos.append(people_one/people_count)
     print(time.time() - t)
-    r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
-    r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
-    r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r = pd.DataFrame(list(zip(distinct,pos, count, ppl, ppl_pos)), columns=["concept_name","encounter_pos", "encounter_count", "people_count", "people_pos"])
     r['domain'] = CONCEPT_NAME_COL
-    r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
-    r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
-    r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
+    r["heuristic_count"] = r.apply(lambda row: row["encounter_pos"] * row["encounter_count"], axis=1)
+    r["heuristic_person"] = r.apply(lambda row: row["people_pos"] * row["people_count"], axis=1)
+    r =r[["concept_name", 'domain', 'encounter_pos','people_pos','encounter_count', 'people_count','heuristic_count','heuristic_person']]
     
     return r
 
@@ -3440,13 +3443,13 @@ def first_covid_positive_testing(everyone_conditions_of_interest_testing):
 def measurement_analysis( Long_COVID_Silver_Standard, measurement):
     TABLE = measurement
     CONCEPT_NAME_COL = "measurement_concept_name"
-    l, h = 0, 1000
+    l, h = 0, 750
 
     label = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
     TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
     distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
     
-    pos, count, ppl = [], [], []
+    pos, count, ppl, ppl_pos = [], [], [], []
     cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
     print(len(distinct))
     t = time.time()
@@ -3454,22 +3457,23 @@ def measurement_analysis( Long_COVID_Silver_Standard, measurement):
         f = TABLE.agg(
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
-            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
+            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None)),
+            F.countDistinct(F.when(((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)), F.col("person_id")).otherwise(None)),
         ).collect()
         one_count = f[0][1]
         size = f[0][0]
         people_count =f[0][2]
+        people_one = f[0][3]
         pos.append(one_count/size)
         count.append(size)
         ppl.append(people_count)
+        ppl_pos.append(people_one/people_count)
     print(time.time() - t)
-    r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
-    r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
-    r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r = pd.DataFrame(list(zip(distinct,pos, count, ppl, ppl_pos)), columns=["concept_name","encounter_pos", "encounter_count", "people_count", "people_pos"])
     r['domain'] = CONCEPT_NAME_COL
-    r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
-    r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
-    r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
+    r["heuristic_count"] = r.apply(lambda row: row["encounter_pos"] * row["encounter_count"], axis=1)
+    r["heuristic_person"] = r.apply(lambda row: row["people_pos"] * row["people_count"], axis=1)
+    r =r[["concept_name", 'domain', 'encounter_pos','people_pos','encounter_count', 'people_count','heuristic_count','heuristic_person']]
     
     return r
 
@@ -3548,13 +3552,13 @@ def num_recent_visits(recent_visits_2):
 def observation_table_analysis_1(observation, Long_COVID_Silver_Standard):
     TABLE = observation
     CONCEPT_NAME_COL = "observation_concept_name"
-    l, h = 0, 1000
+    l, h = 0, 750
 
     label = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
     TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
     distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
     
-    pos, count, ppl = [], [], []
+    pos, count, ppl, ppl_pos = [], [], [], []
     cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
     print(len(distinct))
     t = time.time()
@@ -3562,23 +3566,23 @@ def observation_table_analysis_1(observation, Long_COVID_Silver_Standard):
         f = TABLE.agg(
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
-            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
+            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None)),
+            F.countDistinct(F.when(((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)), F.col("person_id")).otherwise(None)),
         ).collect()
         one_count = f[0][1]
         size = f[0][0]
         people_count =f[0][2]
+        people_one = f[0][3]
         pos.append(one_count/size)
         count.append(size)
         ppl.append(people_count)
+        ppl_pos.append(people_one/people_count)
     print(time.time() - t)
-    r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
-    r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
-    r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r = pd.DataFrame(list(zip(distinct,pos, count, ppl, ppl_pos)), columns=["concept_name","encounter_pos", "encounter_count", "people_count", "people_pos"])
     r['domain'] = CONCEPT_NAME_COL
-    r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
-    r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
-    r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
-    
+    r["heuristic_count"] = r.apply(lambda row: row["encounter_pos"] * row["encounter_count"], axis=1)
+    r["heuristic_person"] = r.apply(lambda row: row["people_pos"] * row["people_count"], axis=1)
+    r =r[["concept_name", 'domain', 'encounter_pos','people_pos','encounter_count', 'people_count','heuristic_count','heuristic_person']]
     return r
 
 @transform_pandas(
@@ -3613,13 +3617,13 @@ def person_information(everyone_cohort_de_id):
 def procedure_table_analysis_1(procedure_occurrence, Long_COVID_Silver_Standard):
     TABLE = procedure_occurrence
     CONCEPT_NAME_COL = "procedure_concept_name"
-    l, h = 0, 1000
+    l, h = 0, 750
 
     label = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
     TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
     distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
     
-    pos, count, ppl = [], [], []
+    pos, count, ppl, ppl_pos = [], [], [], []
     cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
     print(len(distinct))
     t = time.time()
@@ -3627,22 +3631,23 @@ def procedure_table_analysis_1(procedure_occurrence, Long_COVID_Silver_Standard)
         f = TABLE.agg(
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
-            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
+            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None)),
+            F.countDistinct(F.when(((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)), F.col("person_id")).otherwise(None)),
         ).collect()
         one_count = f[0][1]
         size = f[0][0]
         people_count =f[0][2]
+        people_one = f[0][3]
         pos.append(one_count/size)
         count.append(size)
         ppl.append(people_count)
+        ppl_pos.append(people_one/people_count)
     print(time.time() - t)
-    r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
-    r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
-    r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r = pd.DataFrame(list(zip(distinct,pos, count, ppl, ppl_pos)), columns=["concept_name","encounter_pos", "encounter_count", "people_count", "people_pos"])
     r['domain'] = CONCEPT_NAME_COL
-    r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
-    r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
-    r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
+    r["heuristic_count"] = r.apply(lambda row: row["encounter_pos"] * row["encounter_count"], axis=1)
+    r["heuristic_person"] = r.apply(lambda row: row["people_pos"] * row["people_count"], axis=1)
+    r =r[["concept_name", 'domain', 'encounter_pos','people_pos','encounter_count', 'people_count','heuristic_count','heuristic_person']]
     
     return r
 
@@ -3832,14 +3837,14 @@ def recent_visits_w_nlp_notes_2(recent_visits_2, person_nlp_symptom):
 )
 def study_misclassified(train_test_model, procedure_occurrence, condition_occurrence, drug_exposure, observation, device_exposure):
     tables = {procedure_occurrence:"procedure_concept_name",condition_occurrence:"condition_concept_name", drug_exposure:"drug_concept_name", observation:"observation_concept_name", device_exposure:"device_concept_name"}
-    top_k = 100
+    top_k = 1
     
     ret_tables = []
     for TABLE, CONCEPT_NAME_COL in tables.items():
         TABLE = TABLE.join(train_test_model, "person_id").filter((F.col(CONCEPT_NAME_COL) != "No matching concept") & (F.col("ens_outcome") != F.col("outcome"))).select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome"))
         distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(top_k).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
         
-        pos, count, ppl = [], [], []
+        pos, count, ppl, ppl_pos = [], [], [], []
         cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
         print(len(distinct))
         t = time.time()
@@ -3847,22 +3852,23 @@ def study_misclassified(train_test_model, procedure_occurrence, condition_occurr
             f = TABLE.agg(
                 cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
                 cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
-                F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
+                F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None)),
+                F.countDistinct(F.when(((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)), F.col("person_id")).otherwise(None)),
             ).collect()
             one_count = f[0][1]
             size = f[0][0]
             people_count =f[0][2]
+            people_one = f[0][3]
             pos.append(one_count/size)
             count.append(size)
             ppl.append(people_count)
+            ppl_pos.append(people_one/people_count)
         print(time.time() - t)
-        r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
-        r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
-        r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+        r = pd.DataFrame(list(zip(distinct,pos, count, ppl, ppl_pos)), columns=["concept_name","encounter_pos", "encounter_count", "people_count", "people_pos"])
         r['domain'] = CONCEPT_NAME_COL
-        r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
-        r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
-        r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
+        r["heuristic_count"] = r.apply(lambda row: row["encounter_pos"] * row["encounter_count"], axis=1)
+        r["heuristic_person"] = r.apply(lambda row: row["people_pos"] * row["people_count"], axis=1)
+        r =r[["concept_name", 'domain', 'encounter_pos','people_pos','encounter_count', 'people_count','heuristic_count','heuristic_person']]
         ret_tables.append(r)
     ret =  pd.concat(ret_tables)
     return ret
