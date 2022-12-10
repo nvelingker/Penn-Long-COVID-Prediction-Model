@@ -29,7 +29,7 @@ from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import classification_report,roc_auc_score,recall_score, precision_score
+from sklearn.metrics import classification_report,roc_auc_score,recall_score, precision_score, brier_score_loss, average_precision_score, mean_absolute_error
 
 import torch
 import torch.nn as nn
@@ -3896,16 +3896,15 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
 
     #preds = clf.predict_proba(Testing)[:,1]
 
-    lr_test_preds = lrc.predict(X_test)
-    lr_train_preds = lrc.predict(X_train)
-    lr2_test_preds = lrc2.predict(X_test)
-    rf_test_preds = rfc.predict(X_test)
-    rf_train_preds = rfc.predict(X_train)
-    gb_test_preds = gbc.predict(X_test)
-    nnc_test_preds = nnc.predict(nn_scaler.transform(X_test))
+    lr_test_preds = lrc.predict_proba(X_test)[:, 1]
+    lr_train_preds = lrc.predict_proba(X_train)[:, 1]
+    lr2_test_preds = lrc2.predict_proba(X_test)[:, 1]
+    rf_test_preds = rfc.predict_proba(X_test)[:, 1]
+    rf_train_preds = rfc.predict_proba(X_train)[:, 1]
+    gb_test_preds = gbc.predict_proba(X_test)[:, 1]
+    nnc_test_preds = nnc.predict_proba(nn_scaler.transform(X_test))[:, 1]
 
-    print("RF Training Classification Report:\n{}".format(classification_report(y_train, rf_train_preds)))
-    print("LR Training Classification Report:\n{}".format(classification_report(y_train, lr_train_preds)))
+    print("LR Training Classification Report:\n{}".format(classification_report(y_train, np.where(lr_train_preds > 0.5, 1, 0))))
 
     #test_df = 
     test_predictions = pd.DataFrame.from_dict({
@@ -3955,11 +3954,42 @@ def train_valid_split( Long_COVID_Silver_Standard, num_recent_visits):
 )
 def validation_metrics( train_test_model):
     df = train_test_model
-    print("LR Classification Report:\n{}".format(classification_report(df["outcome"], df["lr_outcome"])))
-    print("LR2 Classification Report:\n{}".format(classification_report(df["outcome"], df["lr2_outcome"])))
-    print("RF Classification Report:\n{}".format(classification_report(df["outcome"], df["rf_outcome"])))
-    print("GB Classification Report:\n{}".format(classification_report(df["outcome"], df["gb_outcome"])))
-    print("NN Classification Report:\n{}".format(classification_report(df["outcome"], df["nn_outcome"])))
-    print("Ensemble Classification Report:\n{}".format(classification_report(df["outcome"], df["ens_outcome"])))
+    print("LR Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["lr_outcome"] > 0.5, 1, 0))))
+    print("LR2 Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["lr2_outcome"] > 0.5, 1, 0))))
+    print("RF Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["rf_outcome"] > 0.5, 1, 0))))
+    print("GB Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["gb_outcome"] > 0.5, 1, 0))))
+    print("NN Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["nn_outcome"] > 0.5, 1, 0))))
+    print("Ensemble Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["ens_outcome"] > 0.5, 1, 0))))
+
+    print("LR MAE:", mean_absolute_error(df['outcome'], np.where(df["lr_outcome"] > 0.5, 1, 0)))
+    print("LR Brier score:", brier_score_loss(df['outcome'], df["lr_outcome"]))
+    print("LR AP:", average_precision_score(df['outcome'], df["lr_outcome"]))
+    print("LR ROC AUC:", roc_auc_score(df['outcome'], df["lr_outcome"]))
+    print("-"*10)
+
+    print("RF MAE:", mean_absolute_error(df['outcome'], np.where(df["rf_outcome"] > 0.5, 1, 0)))
+    print("RF Brier score:", brier_score_loss(df['outcome'], df["rf_outcome"]))
+    print("RF AP:", average_precision_score(df['outcome'], df["rf_outcome"]))
+    print("RF ROC AUC:", roc_auc_score(df['outcome'], df["rf_outcome"]))
+    print("-"*10)
+
+    print("GBC MAE:", mean_absolute_error(df['outcome'], np.where(df["gb_outcome"] > 0.5, 1, 0)))
+    print("GBC Brier score:", brier_score_loss(df['outcome'], df["gb_outcome"]))
+    print("GBC AP:", average_precision_score(df['outcome'], df["gb_outcome"]))
+    print("GBC ROC AUC:", roc_auc_score(df['outcome'], df["gb_outcome"]))
+    print("-"*10)
+
+    print("NN MAE:", mean_absolute_error(df['outcome'], np.where(df["nn_outcome"] > 0.5, 1, 0)))
+    print("NN Brier score:", brier_score_loss(df['outcome'], df["nn_outcome"]))
+    print("NN AP:", average_precision_score(df['outcome'], df["nn_outcome"]))
+    print("NN ROC AUC:", roc_auc_score(df['outcome'], df["nn_outcome"]))
+    print("-"*10)
+
+    print("ENS MAE:", mean_absolute_error(df['outcome'], np.where(df["ens_outcome"] > 0.5, 1, 0)))
+    print("ENS Brier score:", brier_score_loss(df['outcome'], df["ens_outcome"]))
+    print("ENS AP:", average_precision_score(df['outcome'], df["ens_outcome"]))
+    print("ENS ROC AUC:", roc_auc_score(df['outcome'], df["ens_outcome"]))
+    print("-"*10)
+
     return df
 
