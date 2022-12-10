@@ -1176,6 +1176,8 @@ def all_patients_summary_fact_table_de_id(all_patients_visit_day_facts_table_de_
     
     df = df.distinct()
 
+    
+
     return df
         
 #################################################
@@ -1380,6 +1382,23 @@ def all_patients_visit_day_facts_table_de_id_testing(everyone_conditions_of_inte
 #################################################
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.9b4ab5dd-d57f-416e-a2ee-75611c8a12bc"),
+    drug_table_analysis_1=Input(rid="ri.foundry.main.dataset.2a5480ef-7699-4f0c-bf5c-2a0f8401224d"),
+    study_misclassified=Input(rid="ri.foundry.main.dataset.235be874-5669-4c42-9ae3-3e6d37b645e1")
+)
+def combined_study( study_misclassified, drug_table_analysis_1):
+    TABLE = drug_table_analysis_1
+    THRESH = 0.66
+    cond = [TABLE.concept_name == study_misclassified.concept_name, TABLE.pos > THRESH, study_misclassified.pos > THRESH]
+    df = study_misclassified.join(TABLE, cond).select(study_misclassified.concept_name,
+    study_misclassified.pos.alias("misc_pos"),
+    TABLE.pos.alias("gen_pos"),
+    study_misclassified.people.alias("misc_people"),
+    TABLE.people.alias("gen_people"),
+    )
+    return df
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.bcbf4137-1508-42b5-bb05-631492b8d3b9"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
     condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2")
@@ -1393,24 +1412,30 @@ def condition_table_analysis(condition_occurrence, Long_COVID_Silver_Standard):
     TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
     distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
     
-    pos, count = [], []
+    pos, count, ppl = [], [], []
     cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
     print(len(distinct))
     t = time.time()
-    for cname in distinct[l:]:
+    for cname in distinct:
         f = TABLE.agg(
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
-            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1))
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
+            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
         ).collect()
         one_count = f[0][1]
         size = f[0][0]
+        people_count =f[0][2]
         pos.append(one_count/size)
         count.append(size)
+        ppl.append(people_count)
     print(time.time() - t)
-    r = pd.DataFrame(list(zip(distinct,pos, count)), columns=[CONCEPT_NAME_COL,"pos", "count"])
+    r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
     r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
-    r['max'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
-    r =r[[CONCEPT_NAME_COL,'pos','neg','max','count']]
+    r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r['domain'] = CONCEPT_NAME_COL
+    r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
+    r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
+    r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
     
     return r
 
@@ -1431,6 +1456,7 @@ def custom_concept_set_members(concept_set_members):
         ["45774751","empagliflozin", "empagliflozin_penn"],
         ["40170911", "liraglutide", "liraglutide_penn"],
         ["4185623", "Fall risk assessment", "fall_risk_assessment_penn"],
+        ["40762523","Fall risk total [Morse Fall Scale]", "fall_risk_assessment_penn"],
         ["43018325", "Performance of Urinary Filtration, Continuous, Greater than 18 hours Per Day", "urinary_filtration_penn"],
         ["3661408", "Pneumonia caused by SARS-CoV-2", "pneumonia_penn"],
         ["42538827", "Uses contraception", "contraception_penn"],
@@ -1439,15 +1465,11 @@ def custom_concept_set_members(concept_set_members):
         ["3035482", "Pain duration - Reported", "pain_duration_penn"],
         ["4271661", "Characteristic of pain", "characteristic_pain_penn"],
         ["1367500", "losartan", "losartan_penn"],
-        ["19011093", "tenofovir", "tenofovir_penn"],
         ["903963", "triamcinolone", "triamcinolone_penn"],
-        ["1593467", "dupilumab", "dupilumab_penn"],
         ["1336926", "tadalafil", "tadalafil_penn"],
-        ["19014878", "azathioprine", "azathioprine_penn"],
         ["1367571", "heparin", "heparin_penn"],
         ["1112921", "ipratropium", "ipratropium_penn"],
         ["798875", "clonazepam 0.5 MG Oral Tablet", "clonazepam_penn"],
-        ["42538117", "Transplanted heart present", "transplanted_heart_penn"],
         ["713823", "ropinirole", "ropinirole_penn"],
         ["19045045", "ergocalciferol", "ergocalciferol_penn"],
         ["1154343", "albuterol", "albuterol_penn"],
@@ -1458,6 +1480,38 @@ def custom_concept_set_members(concept_set_members):
         ["975125", "hydrocortisone", "hydrocortisone_penn"],
         ["1308738", "vitamin B12", "B12_penn"],
         ["1136601", "benzonatate", "benzonatate_penn"],
+        ["1192218","levalbuterol","levalbuterol_penn"],
+        ["1545958", "atorvastatin", "atorvastatin_penn"],
+        ["924566","tamsulosin","tamsulosin_penn"],
+        ["2108253","Collection of blood specimen from a completely implantable venous access device", "venous_implant_penn"],
+        ["74582","Primary malignant neoplasm of rectum", "neoplasm_penn"],
+        ["4218813","Third trimester pregnancy","pregnant_penn"],
+        ["19003999","mycophenolate mofetil", "mofetil_penn"],
+        ["950637", "tacrolimus", "tacrolimus_penn"],
+        ["1551860","pravastatin","pravastatin_penn"],
+        ["1501700","levothyroxine","levothyroxine_penn"],
+        ["1149380","fluticasone","fluticasone_penn"],
+        ["2514406","Initial hospital care, per day, for the evaluation and management of a patient, which requires these 3 key components: A comprehensive history; A comprehensive examination; and Medical decision making of high complexity. Counseling and/or coordination of care with other physicians, other qualified health care professionals, or agencies are provided consistent with the nature of the problem(s) and the patient's and/or family's needs. Usually, the problem(s) requiring admission are of high severity. Typically, 70 minutes are spent at the bedside and on the patient's hospital floor or unit.", "hospitalized_penn"],
+        ["2514527","Periodic comprehensive preventive medicine reevaluation and management of an individual including an age and gender appropriate history, examination, counseling/anticipatory guidance/risk factor reduction interventions, and the ordering of laboratory/diagnostic procedures, established patient; 18-39 years","periodic_checkup_penn"],
+        ["19095164","cholecalciferol","cholecalciferol_penn"],
+        ["923645","omeprazole","omeprazole_penn"],
+        ["1136601","benzonatate","benzonatate_penn"],
+        ["2787823","Assistance with Respiratory Ventilation, Less than 24 Consecutive Hours, Continuous Positive Airway Pressure","ventilator_penn"],
+        ["2788038","Respiratory Ventilation, Greater than 96 Consecutive Hours", "ventilator_penn"],
+        ["1781162","Assistance with Respiratory Ventilation, Greater than 96 Consecutive Hours, High Nasal Flow/Velocity", "ventilator_penn"],
+        ["1781160", "Assistance with Respiratory Ventilation, Less than 24 Consecutive Hours, High Nasal Flow/Velocity", "ventilator_penn"],
+        ["2788037", "Respiratory Ventilation, 24-96 Consecutive Hours", "ventilator_penn"],
+        ["4230167", "Artificial respiration", "ventilator_penn"],
+        ["2745444", "Insertion of Endotracheal Airway into Trachea, Via Natural or Artificial Opening", "tracheostomy_penn"],
+        ["2106562", "Tracheostomy, planned (separate procedure)", "tracheostomy_penn"],
+        ["2786229", "Introduction of Anti-inflammatory into Peripheral Vein, Percutaneous Approach", "antiinflammatory_penn"],
+        ["2787749", "Introduction of Anti-inflammatory into Mouth and Pharynx, External Approach", "antiinflammatory_penn"],
+        ["1332418","amlodipine","amlodipine_penn"],
+        ["435788","Disorder of phosphorus metabolism","metabolism_disorder_penn"],
+        ["2106281", "Most recent systolic blood pressure less than 130 mm Hg (DM), (HTN, CKD, CAD)", "bloodpressure_penn"],
+        ["257907","Disorder of lung","lungdisorder_penn"],
+        ["1567198","insulin aspart, human", "insulin_penn"],
+        ["739138", "sertraline", "sertraline_penn"]
     ]
     #
     #codeset_id, concept_id, concept_set_name, is_most_recent (true),version (1), concept_name, archived (false)
@@ -1500,7 +1554,7 @@ def custom_sets(LL_concept_sets_fusion_everyone):
     df.loc[len(df.index)] = ['prednisone_penn', 'PREDNISONE', 'drug']
     df.loc[len(df.index)] = ['midazolam_penn', 'MIDAZOLAM', 'drug']
     df.loc[len(df.index)] = ['empagliflozin_penn', 'empagliflozin', 'drug']
-    df.loc[len(df.index)] = ['fall_risk_assessment_penn', 'FALL_RISK', 'procedure']
+    df.loc[len(df.index)] = ['fall_risk_assessment_penn', 'FALL_RISK', 'procedure, observation']
     df.loc[len(df.index)] = ['urinary_filtration_penn', 'URINARY_FILTRATION', 'procedure']
     df.loc[len(df.index)] = ['pneumonia_penn', 'pneumonia', 'condition']
     df.loc[len(df.index)] = ['contraception_penn', 'contraception', 'condition']
@@ -1517,17 +1571,41 @@ def custom_sets(LL_concept_sets_fusion_everyone):
     df.loc[len(df.index)] = ["pain_duration_penn", "PAIN_DURATION", "observation"]
     df.loc[len(df.index)] = ["characteristic_pain_penn", "PAIN_CHARACTERISTIC", "observation"]
     df.loc[len(df.index)] = ["losartan_penn", "LOSARTAN", "drug"]
-    df.loc[len(df.index)] = ["tenofovir_penn", "TENOFOVIR", "drug"]
     df.loc[len(df.index)] = ["triamcinolone_penn", "TRIAMCINOLONE", "drug"]
-    df.loc[len(df.index)] = ["dupilumab_penn", "DUPILUMAB", "drug"]
     df.loc[len(df.index)] = ["tadalafil_penn", "TADALAFIL", "drug"]
-    df.loc[len(df.index)] = ["azathioprine_penn", "AZATHIOPRINE", "drug"]
     df.loc[len(df.index)] = ["heparin_penn", "HEPARIN", "drug"]
     df.loc[len(df.index)] = ["ipratropium_penn", "IPRATROPIUM", "drug"]
     df.loc[len(df.index)] = ["clonazepam_penn", "CLONEAZEPAM", "drug"]
-    df.loc[len(df.index)] = ["transplanted_heart_penn", "TRANSPLANTED_HEART", "condition"]
     df.loc[len(df.index)] = ["ropinirole_penn", "ROPINIROLE", "drug"]
-    df.loc[len(df.index)] = ["ergocalciferol_penn", "ERGOCALCIFEROL", "drug"]
+    #df.loc[len(df.index)] = ["ergocalciferol_penn", "ERGOCALCIFEROL", "drug"]
+    df.loc[len(df.index)] = ["levalbuterol_penn", "LEVALBUTEROL", "drug"]
+    df.loc[len(df.index)] = ["atorvastatin_penn", "ATORVASTATIN", "drug"]
+    df.loc[len(df.index)] = ["tamsulosin_penn", "TAMSULOSIN", "drug"]
+    df.loc[len(df.index)] = ["venous_implant_penn", "VENOUSIMPLANT", "procedure"]
+    df.loc[len(df.index)] = ["pregnant_penn", "PREGNANT", "condition"]
+    df.loc[len(df.index)] = ["mofetil_penn", "MOFETIL", "drug"]
+    #df.loc[len(df.index)] = ["tacrolimus_penn", "TACROLIMUS", "drug"]
+    #df.loc[len(df.index)] = ["pravastatin_penn", "PRAVASTATIN", "drug"]
+    df.loc[len(df.index)] = ["levothyroxine_penn", "LEVOTHYROXINE", "drug"]
+    df.loc[len(df.index)] = ["fluticasone_penn", "FLUTICASONE", "drug"]
+    df.loc[len(df.index)] = ["hospitalized_penn", "HOSPITALIZED", "procedure"]
+    df.loc[len(df.index)] = ["periodic_checkup_penn", "PERIODICCHECKUP", "procedure"]
+    df.loc[len(df.index)] = ["cholecalciferol_penn", "CHOLECALCIFEROL", "drug"]
+    df.loc[len(df.index)] = ["omeprazole_penn", "OMEPRAZOLE", "drug"]
+    df.loc[len(df.index)] = ["benzonatate_penn", "BENZONATATE", "drug"]
+    df.loc[len(df.index)] = ["ventilator_penn", "VENTILATOR", "procedure"]
+    df.loc[len(df.index)] = ["tracheostomy_penn", "TRACHEOSTOMY", "procedure"]
+    df.loc[len(df.index)] = ["antiinflammatory_penn", "ANTIINFLAM", "procedure"]
+    df.loc[len(df.index)] = ["electrocardiogram_penn", "ELECTROCARDIOGRAM", "procedure"]
+    df.loc[len(df.index)] = ["respinfection_penn", "RESPINF", "condition"]
+    df.loc[len(df.index)] = ["amlodipine_penn", "AMLODIPINE", "drug"]
+    df.loc[len(df.index)] = ["metabolism_disorder_penn", "METADISORDER", "condition"]
+    df.loc[len(df.index)] = ["bloodpressure_penn", "BLOODPRESSURE", "observation"]
+    df.loc[len(df.index)] = ["lungdisorder_penn", "LUNGDISORDER", "condition"]  
+    df.loc[len(df.index)] = ["sertraline_penn", "SERTRALINE", "drug"]  
+    df.loc[len(df.index)] = ["insulin_penn", "INSULIN", "drug"]  
+    
+    
 
     print(df)
     return df
@@ -1535,13 +1613,11 @@ def custom_sets(LL_concept_sets_fusion_everyone):
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.7881151d-1d96-4301-a385-5d663cc22d56"),
     LL_DO_NOT_DELETE_REQUIRED_concept_sets_all=Input(rid="ri.foundry.main.dataset.029aa987-cfef-48fc-bf45-cffd3792cd93"),
-    custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     custom_sets=Input(rid="ri.foundry.main.dataset.2a1d8398-c54a-4732-8f23-073ced750426")
 )
 #The purpose of this node is to optimize the user's experience connecting a customized concept set "fusion sheet" input data frame to replace LL_concept_sets_fusion_everyone.
 
-def customized_concept_set_input( LL_DO_NOT_DELETE_REQUIRED_concept_sets_all, custom_sets, custom_concept_set_members):
-    concept_set_members = custom_concept_set_members
+def customized_concept_set_input( LL_DO_NOT_DELETE_REQUIRED_concept_sets_all, custom_sets):
     PM_LL_DO_NOT_DELETE_REQUIRED_concept_sets_all = LL_DO_NOT_DELETE_REQUIRED_concept_sets_all
 
     required = LL_DO_NOT_DELETE_REQUIRED_concept_sets_all
@@ -1737,24 +1813,30 @@ def device_table_analysis_1(device_exposure, Long_COVID_Silver_Standard):
     TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
     distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
     
-    pos, count = [], []
+    pos, count, ppl = [], [], []
     cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
     print(len(distinct))
     t = time.time()
-    for cname in distinct[l:]:
+    for cname in distinct:
         f = TABLE.agg(
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
-            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1))
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
+            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
         ).collect()
         one_count = f[0][1]
         size = f[0][0]
+        people_count =f[0][2]
         pos.append(one_count/size)
         count.append(size)
+        ppl.append(people_count)
     print(time.time() - t)
-    r = pd.DataFrame(list(zip(distinct,pos, count)), columns=[CONCEPT_NAME_COL,"pos", "count"])
+    r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
     r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
-    r['max'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
-    r =r[[CONCEPT_NAME_COL,'pos','neg','max','count']]
+    r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r['domain'] = CONCEPT_NAME_COL
+    r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
+    r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
+    r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
     
     return r
 
@@ -1772,24 +1854,30 @@ def drug_table_analysis_1(drug_exposure, Long_COVID_Silver_Standard):
     TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
     distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
     
-    pos, count = [], []
+    pos, count, ppl = [], [], []
     cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
     print(len(distinct))
     t = time.time()
-    for cname in distinct[l:]:
+    for cname in distinct:
         f = TABLE.agg(
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
-            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1))
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
+            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
         ).collect()
         one_count = f[0][1]
         size = f[0][0]
+        people_count =f[0][2]
         pos.append(one_count/size)
         count.append(size)
+        ppl.append(people_count)
     print(time.time() - t)
-    r = pd.DataFrame(list(zip(distinct,pos, count)), columns=[CONCEPT_NAME_COL,"pos", "count"])
+    r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
     r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
-    r['max'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
-    r =r[[CONCEPT_NAME_COL,'pos','neg','max','count']]
+    r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r['domain'] = CONCEPT_NAME_COL
+    r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
+    r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
+    r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
     
     return r
 
@@ -3235,6 +3323,47 @@ def first_covid_positive_testing(everyone_conditions_of_interest_testing):
         .distinct()
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.d5cfe420-8f15-45eb-af08-2b12fe71798f"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7")
+)
+def measurement_analysis( Long_COVID_Silver_Standard, measurement):
+    TABLE = measurement
+    CONCEPT_NAME_COL = "measurement_concept_name"
+    l, h = 0, 1000
+
+    label = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
+    TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
+    distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
+    
+    pos, count, ppl = [], [], []
+    cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
+    print(len(distinct))
+    t = time.time()
+    for cname in distinct:
+        f = TABLE.agg(
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
+            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
+        ).collect()
+        one_count = f[0][1]
+        size = f[0][0]
+        people_count =f[0][2]
+        pos.append(one_count/size)
+        count.append(size)
+        ppl.append(people_count)
+    print(time.time() - t)
+    r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
+    r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
+    r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r['domain'] = CONCEPT_NAME_COL
+    r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
+    r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
+    r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
+    
+    return r
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.a7fb5734-565b-4647-9945-a44ff8ae62db"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
     measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7")
@@ -3315,24 +3444,30 @@ def observation_table_analysis_1(observation, Long_COVID_Silver_Standard):
     TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
     distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
     
-    pos, count = [], []
+    pos, count, ppl = [], [], []
     cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
     print(len(distinct))
     t = time.time()
-    for cname in distinct[l:]:
+    for cname in distinct:
         f = TABLE.agg(
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
-            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1))
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
+            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
         ).collect()
         one_count = f[0][1]
         size = f[0][0]
+        people_count =f[0][2]
         pos.append(one_count/size)
         count.append(size)
+        ppl.append(people_count)
     print(time.time() - t)
-    r = pd.DataFrame(list(zip(distinct,pos, count)), columns=[CONCEPT_NAME_COL,"pos", "count"])
+    r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
     r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
-    r['max'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
-    r =r[[CONCEPT_NAME_COL,'pos','neg','max','count']]
+    r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r['domain'] = CONCEPT_NAME_COL
+    r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
+    r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
+    r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
     
     return r
 
@@ -3374,24 +3509,30 @@ def procedure_table_analysis_1(procedure_occurrence, Long_COVID_Silver_Standard)
     TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
     distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
     
-    pos, count = [], []
+    pos, count, ppl = [], [], []
     cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
     print(len(distinct))
     t = time.time()
-    for cname in distinct[l:]:
+    for cname in distinct:
         f = TABLE.agg(
             cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
-            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1))
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
+            F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
         ).collect()
         one_count = f[0][1]
         size = f[0][0]
+        people_count =f[0][2]
         pos.append(one_count/size)
         count.append(size)
+        ppl.append(people_count)
     print(time.time() - t)
-    r = pd.DataFrame(list(zip(distinct,pos, count)), columns=[CONCEPT_NAME_COL,"pos", "count"])
+    r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
     r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
-    r['max'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
-    r =r[[CONCEPT_NAME_COL,'pos','neg','max','count']]
+    r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r['domain'] = CONCEPT_NAME_COL
+    r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
+    r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
+    r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
     
     return r
 
@@ -3582,26 +3723,30 @@ def study_misclassified(train_test_model, procedure_occurrence, condition_occurr
         TABLE = TABLE.join(train_test_model, "person_id").filter((F.col(CONCEPT_NAME_COL) != "No matching concept") & (F.col("ens_outcome") != F.col("outcome"))).select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome"))
         distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(top_k).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
         
-        pos, count = [], []
+        pos, count, ppl = [], [], []
         cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
         print(len(distinct))
         t = time.time()
         for cname in distinct:
             f = TABLE.agg(
                 cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
-                cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1))
+                cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1)),
+                F.countDistinct(F.when(F.col(CONCEPT_NAME_COL) == cname, F.col("person_id")).otherwise(None))
             ).collect()
             one_count = f[0][1]
             size = f[0][0]
+            people_count =f[0][2]
             pos.append(one_count/size)
             count.append(size)
+            ppl.append(people_count)
         print(time.time() - t)
-        r = pd.DataFrame(list(zip(distinct,pos, count)), columns=["concept_name","pos", "count"])
+        r = pd.DataFrame(list(zip(distinct,pos, count, ppl)), columns=["concept_name","pos", "count", "people"])
         r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
         r['maximum'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
         r['domain'] = CONCEPT_NAME_COL
-        r["heuristic"] = r.apply(lambda row: row["maximum"] * row["count"] if row["maximum"] > 0.7 else 0, axis=1)
-        r =r[["concept_name", 'domain', 'pos','neg','maximum','count','heuristic']]
+        r["heuristic_count"] = r.apply(lambda row: row["pos"] * row["count"] if row["pos"] > 0.7 else 0, axis=1)
+        r["heuristic_person"] = r.apply(lambda row: row["pos"] * row["people"] if row["pos"] > 0.7 else 0, axis=1)
+        r =r[["concept_name", 'domain', 'pos','neg','maximum','count', 'people','heuristic_count','heuristic_person']]
         ret_tables.append(r)
     ret =  pd.concat(ret_tables)
     return ret
@@ -3882,7 +4027,9 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     gbc = GradientBoostingClassifier().fit(X_train, y_train)
 
     lrc_sort_features = np.argsort(lrc.coef_.flatten())[-20:]
+    lrc_sort_features_least = np.argsort(lrc.coef_.flatten())[:20]
     rfc_sort_features = np.argsort(rfc.feature_importances_.flatten())[-20:]
+    rfc_sort_features_least = np.argsort(rfc.feature_importances_.flatten())[:20]
     plt.bar(np.arange(20), rfc.feature_importances_.flatten()[rfc_sort_features])
     plt.xticks(np.arange(20), [cols[1:][i] for i in rfc_sort_features], rotation='vertical')
     plt.tight_layout()
@@ -3890,7 +4037,10 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
 
     print("lrc important features:", [cols[1:][int(i)] for i in lrc_sort_features])
     print("rfc important features:", [cols[1:][int(i)] for i in rfc_sort_features])
-
+    print("lrc least important features:", [cols[1:][int(i)] for i in lrc_sort_features_least ])
+    print("rfc least important features:", [cols[1:][int(i)] for i in rfc_sort_features_least ])
+    print("combined least important features:", [cols[1:][int(i)] for i in rfc_sort_features_least if i in lrc_sort_features_least])
+    print("column variance: \n", all_patients_summary_fact_table_de_id.var().to_string())
     nn_scaler = StandardScaler().fit(X_train)
     nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
 
