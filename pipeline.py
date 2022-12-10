@@ -3471,8 +3471,8 @@ def measurement_analysis( Long_COVID_Silver_Standard, measurement):
     print(time.time() - t)
     r = pd.DataFrame(list(zip(distinct,pos, count, ppl, ppl_pos)), columns=["concept_name","encounter_pos", "encounter_count", "people_count", "people_pos"])
     r['domain'] = CONCEPT_NAME_COL
-    r["heuristic_count"] = r.apply(lambda row: row["encounter_pos"] * row["encounter_count"], axis=1)
-    r["heuristic_person"] = r.apply(lambda row: row["people_pos"] * row["people_count"], axis=1)
+    r["heuristic_count"] = r.apply(lambda row: row["encounter_pos"] * row["encounter_count"] if row["encounter_pos"] > 0.7 else 0, axis=1)
+    r["heuristic_person"] = r.apply(lambda row: row["people_pos"] * row["people_count"] if row["people_pos"] > 0.7 else 0, axis=1)
     r =r[["concept_name", 'domain', 'encounter_pos','people_pos','encounter_count', 'people_count','heuristic_count','heuristic_person']]
     
     return r
