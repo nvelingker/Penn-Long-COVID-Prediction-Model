@@ -29,8 +29,8 @@ WHERE vaccine_txn < 5
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.9392c81b-bbbf-4e66-a366-a2e7e4f9db7b"),
-    aggregate_person_testing=Input(rid="ri.vector.main.execute.47a29e5a-88f1-4a48-8615-bb98ab911fca"),
-    sql_pivot_vax_person_testing=Input(rid="ri.vector.main.execute.b7372302-6638-40c4-ad0c-4f6ab67373da")
+    aggregate_person_testing=Input(rid="ri.foundry.main.dataset.60eebc27-2e46-4a09-a76b-bd61122a81fd"),
+    sql_pivot_vax_person_testing=Input(rid="ri.foundry.main.dataset.9b008b1f-ae3c-4b82-b2fb-f8d9c7a122e9")
 )
 SELECT distinct
     a.person_id, 
@@ -63,8 +63,8 @@ FROM deduplicated
 group by person_id, data_partner_id
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.47a29e5a-88f1-4a48-8615-bb98ab911fca"),
-    deduplicated_testing=Input(rid="ri.vector.main.execute.708dc926-ae90-4f99-bb13-f3957d642c78")
+    Output(rid="ri.foundry.main.dataset.60eebc27-2e46-4a09-a76b-bd61122a81fd"),
+    deduplicated_testing=Input(rid="ri.foundry.main.dataset.407bb4de-2a25-4520-8e03-f1e07031a43f")
 )
 SELECT person_id, data_partner_id, count(vax_date) as vaccine_txn
 FROM deduplicated_testing
@@ -129,9 +129,9 @@ where procedure_concept_id IN (766238, 766239, 766241) and po.data_partner_id = 
     and procedure_date is not null
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.9367a283-bd9d-45c9-9415-67c37443fbcc"),
-    manifest_safe_harbor_testing=Input(rid="ri.foundry.main.dataset.7a5c5585-1c69-4bf5-9757-3fd0d0a209a2"),
-    procedure_occurrence_testing=Input(rid="ri.foundry.main.dataset.88523aaa-75c3-4b55-a79a-ebe27e40ba4f")
+    Output(rid="ri.foundry.main.dataset.74b5dd29-49ed-48ff-b6bf-da1c13614821"),
+    manifest_safe_harbor_testing_copy=Input(rid="ri.foundry.main.dataset.f756c161-a369-4a22-9591-03ace0f5d1a5"),
+    procedure_occurrence_testing_copy=Input(rid="ri.foundry.main.dataset.2d76588c-fe75-4d07-8044-f054444ec728")
 )
 SELECT DISTINCT person_id,
     po.data_partner_id,
@@ -143,8 +143,8 @@ SELECT DISTINCT person_id,
         else null
         end as vax_type
 
-FROM procedure_occurrence_testing po
-INNER JOIN manifest_safe_harbor_testing m ON m.data_partner_id = po.data_partner_id
+FROM procedure_occurrence_testing_copy po
+INNER JOIN manifest_safe_harbor_testing_copy  m ON m.data_partner_id = po.data_partner_id
 where procedure_concept_id IN (766238, 766239, 766241) and po.data_partner_id = 406
     -- Very conservative filters to allow for date shifting
     and procedure_date > '2018-12-20'
@@ -152,12 +152,12 @@ where procedure_concept_id IN (766238, 766239, 766241) and po.data_partner_id = 
     and procedure_date is not null
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.73881ed9-9110-4370-85ab-4c40e879b3ba"),
+    Output(rid="ri.foundry.main.dataset.6f224cbc-ab43-44f9-bf66-f1716c7b1aa7"),
     custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
-    drug_exposure_testing=Input(rid="ri.foundry.main.dataset.26a51cab-0279-45a6-bbc0-f44a12b52f9c"),
-    manifest_safe_harbor_testing=Input(rid="ri.foundry.main.dataset.7a5c5585-1c69-4bf5-9757-3fd0d0a209a2")
+    drug_exposure_testing_copy=Input(rid="ri.foundry.main.dataset.6223d2b6-e8b8-4d48-8c4c-81dd2959d131"),
+    manifest_safe_harbor_testing_copy=Input(rid="ri.foundry.main.dataset.f756c161-a369-4a22-9591-03ace0f5d1a5")
 )
-/* Import the drug_exposure_testing, concept_set_members, and manifest_safe_harbor_testing tables */
+/* Import the drug_exposure_testing_copy, concept_set_members, and manifest_safe_harbor_testing tables */
 
 SELECT distinct de.person_id,
     de.data_partner_id,
@@ -173,8 +173,8 @@ SELECT distinct de.person_id,
         end as vax_type
     
 FROM custom_concept_set_members cs
-INNER JOIN drug_exposure_testing de on cs.concept_id = de.drug_concept_id
-INNER JOIN manifest_safe_harbor_testing m on de.data_partner_id = m.data_partner_id
+INNER JOIN drug_exposure_testing_copy de on cs.concept_id = de.drug_concept_id
+INNER JOIN manifest_safe_harbor_testing_copy m on de.data_partner_id = m.data_partner_id
 
 where codeset_id = 600531961
     and drug_exposure_start_date is not null
@@ -208,12 +208,10 @@ SELECT DISTINCT person_id,
 FROM baseline_vaccines_from_proc
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.de1a2a39-7020-47f6-bb12-0a2e2ccec6a1"),
-    baseline_vaccines_from_proc_testing=Input(rid="ri.vector.main.execute.9367a283-bd9d-45c9-9415-67c37443fbcc"),
-    baseline_vaccines_testing=Input(rid="ri.vector.main.execute.73881ed9-9110-4370-85ab-4c40e879b3ba")
+    Output(rid="ri.foundry.main.dataset.783be2cb-5a74-4652-baf6-b0b7b5b6d046"),
+    baseline_vaccines_from_proc_testing=Input(rid="ri.foundry.main.dataset.74b5dd29-49ed-48ff-b6bf-da1c13614821"),
+    baseline_vaccines_testing=Input(rid="ri.foundry.main.dataset.6f224cbc-ab43-44f9-bf66-f1716c7b1aa7")
 )
---create minimal long dataset of vaccine transactions to transpose 
-
 SELECT DISTINCT person_id, 
     data_partner_id,
     drug_exposure_start_date as vax_date,
@@ -245,8 +243,8 @@ pivot (
 )
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.b7372302-6638-40c4-ad0c-4f6ab67373da"),
-    deduplicated_testing=Input(rid="ri.vector.main.execute.708dc926-ae90-4f99-bb13-f3957d642c78")
+    Output(rid="ri.foundry.main.dataset.9b008b1f-ae3c-4b82-b2fb-f8d9c7a122e9"),
+    deduplicated_testing=Input(rid="ri.foundry.main.dataset.407bb4de-2a25-4520-8e03-f1e07031a43f")
 )
 
 select * from (
@@ -259,11 +257,4 @@ pivot (
     max(vax_date) as vax_date, max(vax_type) as vax_type 
     for number in (1,2,3,4) 
 )
-
-@transform_pandas(
-    Output(rid="ri.foundry.main.dataset.4e2bf601-5e1d-4116-9dee-f3baefd298c9"),
-    train_test_model=Input(rid="ri.foundry.main.dataset.ea6c836a-9d51-4402-b1b7-0e30fb514fc8")
-)
-SELECT *
-FROM train_test_model
 

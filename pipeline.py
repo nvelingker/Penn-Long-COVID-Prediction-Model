@@ -32,6 +32,10 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import classification_report,roc_auc_score,recall_score, precision_score, brier_score_loss, average_precision_score, mean_absolute_error
 
+#load train or test to test copies
+LOAD_TEST = 1
+#turn merge_label to 0 before submission
+MERGE_LABEL = 1
 import torch
 import torch.nn as nn
 import numpy as np
@@ -1305,16 +1309,37 @@ def all_patients_summary_fact_table_de_id(all_patients_visit_day_facts_table_de_
 #Description - The final step is to aggregate information to create a data frame that contains a single row of data for each patient in the cohort.  This node aggregates all information from the cohort_all_facts_table and summarizes each patient's facts in a single row.
 
 def all_patients_summary_fact_table_de_id_testing(all_patients_visit_day_facts_table_de_id_testing, everyone_cohort_de_id_testing):
-    everyone_cohort_de_id = everyone_cohort_de_id_testing
-    all_patients_visit_day_facts_table_de_id = all_patients_visit_day_facts_table_de_id_testing
-
     #deaths_df = everyone_patient_deaths.select('person_id','patient_death')
-    df = all_patients_visit_day_facts_table_de_id.drop('patient_death_at_visit', 'during_macrovisit_hospitalization')
-  
+    df = all_patients_visit_day_facts_table_de_id_testing.drop('patient_death_at_visit', 'during_macrovisit_hospitalization')
+    
+    df2 = all_patients_visit_day_facts_table_de_id_testing.select('person_id', 'visit_date', 'Oxygen_saturation').where(all_patients_visit_day_facts_table_de_id_testing.Oxygen_saturation>0)    
+    
+    df3 = all_patients_visit_day_facts_table_de_id_testing.select('person_id', 'visit_date', 'blood_sodium').where(all_patients_visit_day_facts_table_de_id_testing.blood_sodium>0) 
+    
+    df4 = all_patients_visit_day_facts_table_de_id_testing.select('person_id', 'visit_date', 'blood_hemoglobin').where(all_patients_visit_day_facts_table_de_id_testing.blood_hemoglobin>0) 
+
+    df5 = all_patients_visit_day_facts_table_de_id_testing.select('person_id', 'visit_date', 'blood_Creatinine').where(all_patients_visit_day_facts_table_de_id_testing.blood_Creatinine>0)
+
+    df6 = all_patients_visit_day_facts_table_de_id_testing.select('person_id', 'visit_date', 'blood_UreaNitrogen').where(all_patients_visit_day_facts_table_de_id_testing.blood_UreaNitrogen>0)
+
     df = df.groupby('person_id').agg(
         F.max('BMI_rounded').alias('BMI_max_observed_or_calculated'),
-        *[F.max(col).alias(col + '_indicator') for col in df.columns if col not in ('person_id', 'BMI_rounded', 'visit_date', 'had_vaccine_administered')],
+        F.avg('respiratory_rate').alias('respiratory_rate'),
+        *[F.max(col).alias(col + '_indicator') for col in df.columns if col not in ('person_id', 'BMI_rounded', 'visit_date', 'had_vaccine_administered', 'Oxygen_saturation', 'blood_sodium', 'blood_hemoglobin', 'respiratory_rate', 'blood_Creatinine', 'blood_UreaNitrogen')],
         F.sum('had_vaccine_administered').alias('total_number_of_COVID_vaccine_doses'))
+    
+    df2 = df2.groupby('person_id').agg(
+        F.min('Oxygen_saturation').alias('min_Oxygen_saturation'))
+    df3 = df3.groupby('person_id').agg(
+        F.last('blood_sodium').alias('last_blood_sodium'))
+    df4 = df4.groupby('person_id').agg(
+        F.last('blood_hemoglobin').alias('last_blood_hemoglobin'))
+    df5 = df5.groupby('person_id').agg(
+        F.last('blood_Creatinine').alias('last_blood_Creatinine'))
+    df6 = df6.groupby('person_id').agg(
+        F.last('blood_UreaNitrogen').alias('last_blood_UreaNitrogen'))
+    
+    df = df.join(df2, on=['person_id'], how='left').join(df3, on=['person_id'], how='left').join(df4, on=['person_id'], how='left').join(df5, on=['person_id'], how='left').join(df6, on=['person_id'], how='left')
 
     #columns to indicate whether a patient belongs in confirmed or possible subcohorts
     df = df.withColumn('confirmed_covid_patient', 
@@ -1323,21 +1348,22 @@ def all_patients_summary_fact_table_de_id_testing(all_patients_visit_day_facts_t
     df = df.withColumn('possible_covid_patient', 
         F.when(F.col('confirmed_covid_patient') == 1, 0)
         .when(F.col('Antibody_Pos_indicator') == 1, 1)
-        .when(F.col('LL_Long_COVID_diagnosis_indicator') == 1, 1)
         .when(F.col('LL_Long_COVID_clinic_visit_indicator') == 1, 1)
         .when(F.col('LL_PNEUMONIADUETOCOVID_indicator') == 1, 1)
         .when(F.col('LL_MISC_indicator') == 1, 1)
         .otherwise(0))     
-    
+    #.when(F.col('LL_Long_COVID_diagnosis_indicator') == 1, 1) removed above since it seems this was removed from the conditions table
     #join above tables on patient ID  
     #df = df.join(deaths_df, 'person_id', 'left').withColumnRenamed('patient_death', 'patient_death_indicator')
-    df = everyone_cohort_de_id.join(df, 'person_id','left')
+    df = everyone_cohort_de_id_testing.join(df, 'person_id','left')
 
     #final fill of null in non-continuous variables with 0
     # df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_max_observed_or_calculated', 'postal_code', 'age')])
-
-    df = df.distinct()
     
+    df = df.distinct()
+
+    
+
     return df
         
 #################################################
@@ -1428,30 +1454,22 @@ def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, ev
     everyone_observations_of_interest_testing=Input(rid="ri.foundry.main.dataset.746705a9-da68-43c5-8ad9-dad8ab4ab3cf"),
     everyone_procedures_of_interest_testing=Input(rid="ri.foundry.main.dataset.a53998dc-abce-48c9-a390-b0cbf8b4a0a2"),
     everyone_vaccines_of_interest_testing=Input(rid="ri.foundry.main.dataset.97cdf176-e012-49e9-8eff-6667e5f67e1a"),
-    microvisits_to_macrovisits_testing=Input(rid="ri.foundry.main.dataset.f5008fa4-e736-4244-88e1-1da7a68efcdb")
+    microvisits_to_macrovisits_testing_copy=Input(rid="ri.foundry.main.dataset.05de4355-6100-463e-930a-0e9d3c8a8baa")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
 #Last Update - 7/8/22
 #Description - All facts collected in the previous steps are combined in this cohort_all_facts_table on the basis of unique visit days for each patient. Indicators are created for the presence or absence of events, medications, conditions, measurements, device exposures, observations, procedures, and outcomes.  It also creates an indicator for whether the visit date where a fact was noted occurred during any hospitalization. This table is useful if the analyst needs to use actual dates of events as it provides more detail than the final patient-level table.  Use the max and min functions to find the first and last occurrences of any events.
 
-def all_patients_visit_day_facts_table_de_id_testing(everyone_conditions_of_interest_testing, everyone_measurements_of_interest_testing, everyone_procedures_of_interest_testing, everyone_observations_of_interest_testing, everyone_drugs_of_interest_testing, everyone_devices_of_interest_testing, everyone_vaccines_of_interest_testing, microvisits_to_macrovisits_testing):
-    everyone_drugs_of_interest = everyone_drugs_of_interest_testing
-    everyone_procedures_of_interest = everyone_procedures_of_interest_testing
-    everyone_observations_of_interest = everyone_observations_of_interest_testing
-    everyone_measurements_of_interest = everyone_measurements_of_interest_testing
-    everyone_conditions_of_interest = everyone_conditions_of_interest_testing
-    everyone_vaccines_of_interest = everyone_vaccines_of_interest_testing
-    everyone_devices_of_interest = everyone_devices_of_interest_testing
-
-    macrovisits_df = microvisits_to_macrovisits_testing
-    vaccines_df = everyone_vaccines_of_interest
-    procedures_df = everyone_procedures_of_interest
-    devices_df = everyone_devices_of_interest
-    observations_df = everyone_observations_of_interest
-    conditions_df = everyone_conditions_of_interest
-    drugs_df = everyone_drugs_of_interest
-    measurements_df = everyone_measurements_of_interest
+def all_patients_visit_day_facts_table_de_id_testing(everyone_conditions_of_interest_testing, everyone_measurements_of_interest_testing, everyone_procedures_of_interest_testing, everyone_observations_of_interest_testing, everyone_drugs_of_interest_testing, everyone_devices_of_interest_testing, everyone_vaccines_of_interest_testing, microvisits_to_macrovisits_testing_copy):
+    macrovisits_df = microvisits_to_macrovisits_testing_copy
+    vaccines_df = everyone_vaccines_of_interest_testing
+    procedures_df = everyone_procedures_of_interest_testing
+    devices_df = everyone_devices_of_interest_testing
+    observations_df = everyone_observations_of_interest_testing
+    conditions_df = everyone_conditions_of_interest_testing
+    drugs_df = everyone_drugs_of_interest_testing
+    measurements_df = everyone_measurements_of_interest_testing
 
     df = macrovisits_df.select('person_id','visit_start_date').withColumnRenamed('visit_start_date','visit_date')
     df = df.join(vaccines_df, on=list(set(df.columns)&set(vaccines_df.columns)), how='outer')
@@ -1461,6 +1479,7 @@ def all_patients_visit_day_facts_table_de_id_testing(everyone_conditions_of_inte
     df = df.join(conditions_df, on=list(set(df.columns)&set(conditions_df.columns)), how='outer')
     df = df.join(drugs_df, on=list(set(df.columns)&set(drugs_df.columns)), how='outer')
     df = df.join(measurements_df, on=list(set(df.columns)&set(measurements_df.columns)), how='outer')
+    # df = df.join(nlp_symptom_df, on=list(set(df.columns)&set(nlp_symptom_df.columns)), how='outer')
     
     # df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
    
@@ -1485,7 +1504,14 @@ def all_patients_visit_day_facts_table_de_id_testing(everyone_conditions_of_inte
     #final fill of null in non-continuous variables with 0
     # df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
 
+    for col in sorted(df.columns):
+        print(col)
+
     return df
+    
+#################################################
+## Global imports and functions included below ##
+#################################################
     
 #################################################
 ## Global imports and functions included below ##
@@ -1507,6 +1533,15 @@ def combined_study( study_misclassified, drug_table_analysis_1):
     TABLE.people.alias("gen_people"),
     )
     return df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.a32b3d71-226c-4347-aaed-2c4900e2f4fb"),
+    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
+    condition_occurrence_testing=Input(rid="ri.foundry.main.dataset.3e01546f-f110-4c67-a6db-9063d2939a74")
+)
+def condition_occurrence_testing_copy(condition_occurrence_testing, condition_occurrence):
+    return condition_occurrence_testing if LOAD_TEST == 1 else condition_occurrence
+    
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.bcbf4137-1508-42b5-bb05-631492b8d3b9"),
@@ -1757,6 +1792,8 @@ def customized_concept_set_input_testing( LL_DO_NOT_DELETE_REQUIRED_concept_sets
     customizable = custom_sets
     
     df = required.join(customizable, on = required.columns, how = 'outer')
+
+    
     return df
 
 #################################################
@@ -1837,8 +1874,8 @@ def deduplicated(distinct_vax_person):
     return df
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.708dc926-ae90-4f99-bb13-f3957d642c78"),
-    distinct_vax_person_testing=Input(rid="ri.vector.main.execute.de1a2a39-7020-47f6-bb12-0a2e2ccec6a1")
+    Output(rid="ri.foundry.main.dataset.407bb4de-2a25-4520-8e03-f1e07031a43f"),
+    distinct_vax_person_testing=Input(rid="ri.foundry.main.dataset.783be2cb-5a74-4652-baf6-b0b7b5b6d046")
 )
 # Records for shots are often duplicated on different days, especially
 # in the procedures table for site 406. For that site, if shots are
@@ -1911,6 +1948,14 @@ def deduplicated_testing(distinct_vax_person_testing):
     return df
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.ca1772cd-c245-453d-ac74-d0c42e490f2e"),
+    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
+    device_exposure_testing=Input(rid="ri.foundry.main.dataset.7e24a101-2206-45d9-bcaa-b9d84bd2f990")
+)
+def device_exposure_testing_copy(device_exposure_testing, device_exposure):
+    return device_exposure_testing if LOAD_TEST == 1 else device_exposure
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.ffc3d120-eaa8-4a04-8bcb-69b6dcb16ad8"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
     device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874")
@@ -1951,6 +1996,14 @@ def device_table_analysis_1(device_exposure, Long_COVID_Silver_Standard):
     r =r[["concept_name", 'domain', 'encounter_pos','people_pos','encounter_count', 'people_count','heuristic_count','heuristic_person']]
     
     return r
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.6223d2b6-e8b8-4d48-8c4c-81dd2959d131"),
+    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
+    drug_exposure_testing=Input(rid="ri.foundry.main.dataset.26a51cab-0279-45a6-bbc0-f44a12b52f9c")
+)
+def drug_exposure_testing_copy(drug_exposure_testing, drug_exposure):
+    return drug_exposure_testing if LOAD_TEST == 1 else drug_exposure
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.2a5480ef-7699-4f0c-bf5c-2a0f8401224d"),
@@ -2143,17 +2196,17 @@ def everyone_cohort_de_id( person, location, manifest_safe_harbor, microvisits_t
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
     custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
-    location_testing=Input(rid="ri.foundry.main.dataset.06b728e0-0262-4a7a-b9b7-fe91c3f7da34"),
-    manifest_safe_harbor_testing=Input(rid="ri.foundry.main.dataset.7a5c5585-1c69-4bf5-9757-3fd0d0a209a2"),
-    microvisits_to_macrovisits_testing=Input(rid="ri.foundry.main.dataset.f5008fa4-e736-4244-88e1-1da7a68efcdb"),
-    person_testing=Input(rid="ri.foundry.main.dataset.06629068-25fc-4802-9b31-ead4ed515da4")
+    location_testing_copy=Input(rid="ri.foundry.main.dataset.71a84ecb-f5da-4847-937b-42a7fb9e1272"),
+    manifest_safe_harbor_testing_copy=Input(rid="ri.foundry.main.dataset.f756c161-a369-4a22-9591-03ace0f5d1a5"),
+    microvisits_to_macrovisits_testing_copy=Input(rid="ri.foundry.main.dataset.05de4355-6100-463e-930a-0e9d3c8a8baa"),
+    person_testing_copy=Input(rid="ri.foundry.main.dataset.543e1d80-626e-4a3d-a196-d0c7b434fb41")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave. More information can be found in the README linked here (https://unite.nih.gov/workspace/report/ri.report.main.report.855e1f58-bf44-4343-9721-8b4c878154fe).
 #Creator/Owner/contact - Andrea Zhou
 #Last Update - 5/6/22
 #Description - This node gathers some commonly used facts about these patients from the "person" and "location" tables, as well as some facts about the patient's institution (from the "manifest" table).  Available age, race, and locations data (including SDOH variables for L3 only) is gathered at this node.  The patient’s total number of visits as well as the number of days in their observation period is calculated from the “microvisits_to_macrovisits” table in this node.  These facts will eventually be joined with the final patient-level table in the final node.
 
-def everyone_cohort_de_id_testing( person_testing, location_testing, manifest_safe_harbor_testing, microvisits_to_macrovisits_testing, custom_concept_set_members):
+def everyone_cohort_de_id_testing(location_testing_copy, manifest_safe_harbor_testing_copy, microvisits_to_macrovisits_testing_copy, custom_concept_set_members, person_testing_copy):
     concept_set_members = custom_concept_set_members
         
     """
@@ -2164,18 +2217,18 @@ def everyone_cohort_de_id_testing( person_testing, location_testing, manifest_sa
 
     concepts_df = concept_set_members
     
-    person_sample = person_testing \
+    person_sample = person_testing_copy \
         .select('person_id','year_of_birth','month_of_birth','day_of_birth','ethnicity_concept_name','race_concept_name','gender_concept_name','location_id','data_partner_id') \
         .distinct() \
         .sample(False, proportion_of_patients_to_use, 111)
 
-    visits_df = microvisits_to_macrovisits_testing.select("person_id", "macrovisit_start_date", "visit_start_date")
+    visits_df = microvisits_to_macrovisits_testing_copy.select("person_id", "macrovisit_start_date", "visit_start_date")
 
-    manifest_df = manifest_safe_harbor_testing \
+    manifest_df = manifest_safe_harbor_testing_copy \
         .select('data_partner_id','run_date','cdm_name','cdm_version','shift_date_yn','max_num_shift_days') \
         .withColumnRenamed("run_date", "data_extraction_date")
 
-    location_df = location_testing \
+    location_df = location_testing_copy \
         .dropDuplicates(subset=['location_id']) \
         .select('location_id','city','state','zip','county') \
         .withColumnRenamed('zip','postal_code')   
@@ -2336,7 +2389,7 @@ def everyone_conditions_of_interest(everyone_cohort_de_id, condition_occurrence,
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.ae4f0220-6939-4f61-a97a-ff78d29df156"),
-    condition_occurrence_testing=Input(rid="ri.foundry.main.dataset.3e01546f-f110-4c67-a6db-9063d2939a74"),
+    condition_occurrence_testing_copy=Input(rid="ri.foundry.main.dataset.a32b3d71-226c-4347-aaed-2c4900e2f4fb"),
     custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
     everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4")
@@ -2346,16 +2399,13 @@ def everyone_conditions_of_interest(everyone_cohort_de_id, condition_occurrence,
 #Last Update - 5/6/22
 #Description - This node filters the condition_eras table for rows that have a condition_concept_id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these conditions are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_conditions_of_interest_testing(everyone_cohort_de_id_testing, condition_occurrence_testing, customized_concept_set_input_testing, custom_concept_set_members):
+def everyone_conditions_of_interest_testing(everyone_cohort_de_id_testing, condition_occurrence_testing_copy, customized_concept_set_input_testing, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
-    everyone_cohort_de_id = everyone_cohort_de_id_testing
-    customized_concept_set_input = customized_concept_set_input_testing
 
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id_testing.select('person_id')
-    
     #filter observations table to only cohort patients    
-    conditions_df = condition_occurrence_testing \
+    conditions_df = condition_occurrence_testing_copy \
         .select('person_id', 'condition_start_date', 'condition_concept_id') \
         .where(F.col('condition_start_date').isNotNull()) \
         .withColumnRenamed('condition_start_date','visit_date') \
@@ -2363,20 +2413,18 @@ def everyone_conditions_of_interest_testing(everyone_cohort_de_id_testing, condi
         .join(persons,'person_id','inner')
 
     #filter fusion sheet for concept sets and their future variable names that have concepts in the conditions domain
-    fusion_df = customized_concept_set_input \
-        .filter(customized_concept_set_input.domain.contains('condition')) \
+    fusion_df = customized_concept_set_input_testing \
+        .filter(customized_concept_set_input_testing.domain.contains('condition')) \
         .select('concept_set_name','indicator_prefix')
-
     #filter concept set members table to only concept ids for the conditions of interest
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
-        .where(F.col('is_most_recent_version')=='true') \
+        .where((F.col('is_most_recent_version')=='true') | (F.col('concept_set_name') == 'Long-COVID (PASC)') | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix')
 
     #find conditions information based on matching concept ids for conditions of interest
-    df = conditions_df.join(concepts_df, 'concept_id', 'right')
-
+    df = conditions_df.join(concepts_df, 'concept_id', 'inner')
     #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for conditions of interest    
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
    
@@ -2441,7 +2489,7 @@ def everyone_devices_of_interest(device_exposure, everyone_cohort_de_id, customi
     Output(rid="ri.foundry.main.dataset.f423414f-5fc1-4b38-8019-a2176fd99de5"),
     custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
-    device_exposure_testing=Input(rid="ri.foundry.main.dataset.7e24a101-2206-45d9-bcaa-b9d84bd2f990"),
+    device_exposure_testing_copy=Input(rid="ri.foundry.main.dataset.ca1772cd-c245-453d-ac74-d0c42e490f2e"),
     everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
@@ -2449,15 +2497,13 @@ def everyone_devices_of_interest(device_exposure, everyone_cohort_de_id, customi
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_devices_of_interest_testing(device_exposure_testing, everyone_cohort_de_id_testing, customized_concept_set_input_testing, custom_concept_set_members):
+def everyone_devices_of_interest_testing(everyone_cohort_de_id_testing, customized_concept_set_input_testing, custom_concept_set_members, device_exposure_testing_copy):
     concept_set_members = custom_concept_set_members
-    everyone_cohort_de_id = everyone_cohort_de_id_testing
-    customized_concept_set_input = customized_concept_set_input_testing
 
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id_testing.select('person_id')
     #filter device exposure table to only cohort patients
-    devices_df = device_exposure_testing \
+    devices_df = device_exposure_testing_copy \
         .select('person_id','device_exposure_start_date','device_concept_id') \
         .where(F.col('device_exposure_start_date').isNotNull()) \
         .withColumnRenamed('device_exposure_start_date','visit_date') \
@@ -2465,18 +2511,18 @@ def everyone_devices_of_interest_testing(device_exposure_testing, everyone_cohor
         .join(persons,'person_id','inner')
 
     #filter fusion sheet for concept sets and their future variable names that have concepts in the devices domain
-    fusion_df = customized_concept_set_input \
-        .filter(customized_concept_set_input.domain.contains('device')) \
+    fusion_df = customized_concept_set_input_testing \
+        .filter(customized_concept_set_input_testing.domain.contains('device')) \
         .select('concept_set_name','indicator_prefix')
     #filter concept set members table to only concept ids for the devices of interest
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
-        .where(F.col('is_most_recent_version')=='true') \
+        .where((F.col('is_most_recent_version')=='true')  | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix')
         
     #find device exposure information based on matching concept ids for devices of interest
-    df = devices_df.join(concepts_df, 'concept_id', 'right')
+    df = devices_df.join(concepts_df, 'concept_id', 'inner')
     #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for devices of interest
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
 
@@ -2546,7 +2592,7 @@ def everyone_drugs_of_interest( drug_exposure, everyone_cohort_de_id, customized
     Output(rid="ri.foundry.main.dataset.c467232f-7ce8-493a-9c58-19438b8bae42"),
     custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
-    drug_exposure_testing=Input(rid="ri.foundry.main.dataset.26a51cab-0279-45a6-bbc0-f44a12b52f9c"),
+    drug_exposure_testing_copy=Input(rid="ri.foundry.main.dataset.6223d2b6-e8b8-4d48-8c4c-81dd2959d131"),
     everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
     first_covid_positive_testing=Input(rid="ri.foundry.main.dataset.5b84887d-8fd0-49bf-969e-6a78dc3060ca")
 )
@@ -2555,15 +2601,13 @@ def everyone_drugs_of_interest( drug_exposure, everyone_cohort_de_id, customized
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_drugs_of_interest_testing( drug_exposure_testing, everyone_cohort_de_id_testing, customized_concept_set_input_testing, first_covid_positive_testing, custom_concept_set_members):
+def everyone_drugs_of_interest_testing( drug_exposure_testing_copy, everyone_cohort_de_id_testing, customized_concept_set_input_testing, first_covid_positive_testing, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
-    everyone_cohort_de_id = everyone_cohort_de_id_testing
-    customized_concept_set_input = customized_concept_set_input_testing
   
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id_testing.select('person_id')
     #filter drug exposure table to only cohort patients    
-    drug_df = drug_exposure_testing \
+    drug_df = drug_exposure_testing_copy \
         .select('person_id','drug_exposure_start_date','drug_concept_id') \
         .where(F.col('drug_exposure_start_date').isNotNull()) \
         .withColumnRenamed('drug_exposure_start_date','visit_date') \
@@ -2571,18 +2615,19 @@ def everyone_drugs_of_interest_testing( drug_exposure_testing, everyone_cohort_d
         .join(persons,'person_id','inner')
 
     #filter fusion sheet for concept sets and their future variable names that have concepts in the drug domain
-    fusion_df = customized_concept_set_input \
-        .filter(customized_concept_set_input.domain.contains('drug')) \
+    fusion_df = customized_concept_set_input_testing \
+        .filter(customized_concept_set_input_testing.domain.contains('drug')) \
         .select('concept_set_name','indicator_prefix')
+    fusion_df.show(100)
     #filter concept set members table to only concept ids for the drugs of interest
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
-        .where(F.col('is_most_recent_version')=='true') \
+        .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
-        .select('concept_id','indicator_prefix')
-        
+        .select('concept_id','indicator_prefix', 'concept_set_name')
+    concepts_df.show(100)
     #find drug exposure information based on matching concept ids for drugs of interest
-    df = drug_df.join(concepts_df, 'concept_id', 'right')
+    df = drug_df.join(concepts_df, 'concept_id', 'inner')
     #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for drugs of interest
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0) \
         .join(first_covid_positive_testing, 'person_id', 'leftouter') \
@@ -2591,11 +2636,6 @@ def everyone_drugs_of_interest_testing( drug_exposure_testing, everyone_cohort_d
         .drop(F.col('first_covid_positive'))
 
     return df
-    
-
-#################################################
-## Global imports and functions included below ##
-#################################################
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.99e1cf7c-8848-4a3c-8f26-5cc7499311da"),
@@ -2976,28 +3016,28 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     Output(rid="ri.foundry.main.dataset.947ff73f-4427-404f-b65b-2e709cdcbddd"),
     custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
-    measurement_testing=Input(rid="ri.foundry.main.dataset.b7749e49-cf01-4d0a-a154-2f00eecab21e")
+    measurement_testing_copy=Input(rid="ri.foundry.main.dataset.92566631-b0d5-4fab-8a14-5c3d0d6ad560")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
 #Last Update - 5/6/22
 #Description - This node filters the measurements table for rows that have a measurement_concept_id associated with one of the concept sets described in the data dictionary in the README.  Indicator names for a positive COVID PCR or AG test, negative COVID PCR or AG test, positive COVID antibody test, and negative COVID antibody test are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date. It also finds the harmonized value as a number for BMI measurements and collapses these values to unique instances on the basis of patient and visit date.  Measurement BMI cutoffs included are intended for adults. Analyses focused on pediatric measurements should use different bounds for BMI measurements. 
 
-def everyone_measurements_of_interest_testing(measurement_testing, everyone_cohort_de_id_testing, custom_concept_set_members):
+def everyone_measurements_of_interest_testing(measurement_testing_copy, everyone_cohort_de_id_testing, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
     
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id_testing.select('person_id', 'gender_concept_name')
     #filter procedure occurrence table to only cohort patients    
-    df = measurement_testing \
-        .select('person_id','measurement_date','measurement_concept_id','harmonized_value_as_number','value_as_concept_id') \
+    df = measurement_testing_copy \
+        .select('person_id','measurement_date','measurement_concept_id','harmonized_value_as_number','value_as_concept_id','value_as_number') \
         .where(F.col('measurement_date').isNotNull()) \
         .withColumnRenamed('measurement_date','visit_date') \
         .join(persons,'person_id','inner')
         
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
-        .where(F.col('is_most_recent_version')=='true')
+        .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True))
           
     #Find BMI closest to COVID using both reported/observed BMI and calculated BMI using height and weight.  Cutoffs for reasonable height, weight, and BMI are provided and can be changed by the template user.
     lowest_acceptable_BMI = 10
@@ -3006,6 +3046,103 @@ def everyone_measurements_of_interest_testing(measurement_testing, everyone_coho
     highest_acceptable_weight = 300 #in kgs
     lowest_acceptable_height = .6 #in meters
     highest_acceptable_height = 2.43 #in meters
+#40762499
+    blood_oxygen_codeset_id=[40762499] # normal people: 75-100
+    lowest_blood_oxygen = 20
+    highest_blood_oxygen = 100
+    
+    blood_sodium_codeset_id=[3019550]    # normal people: 137-145
+    lowest_blood_sodium = 90
+    highest_blood_sodium = 200
+    
+    blood_hemoglobin_codeset_id=[3000963]  # normal people: 11-16
+    lowest_blood_hemoglobin = 3
+    highest_blood_hemoglobin = 40
+
+    respiratory_rate_codeset_id=[3024171]  # normal people: 12-20
+    lowest_respiratory_rate=5
+    highest_respiratory_rate=60
+    
+    blood_Creatinine_codeset_id=[3016723]  # normal people: 0.6-1.3
+    lowest_blood_Creatinine = 0.2
+    highest_blood_Creatinine = 5
+
+    blood_UreaNitrogen_codeset_id=[3013682]  # normal people: 10-20
+    lowest_blood_UreaNitrogen = 3
+    highest_blood_UreaNitrogen = 80
+    
+    blood_Potassium_codeset_id=[3023103]  # normal people: 3.5-5.0 mEq/L
+    lowest_blood_Potassium = 1
+    highest_blood_Potassium = 30
+
+    blood_Chloride_codeset_id=[3014576]  # normal people: 96-106 mEq/L
+    lowest_blood_Chloride = 60
+    highest_blood_Chloride = 300
+    
+    blood_Calcium_codeset_id=[3006906]  # normal people: 8.5-10.2 mg/dL
+    lowest_blood_Calcium = 3
+    highest_blood_Calcium = 30
+
+    MCV_codeset_id=[3023599]  # normal people: 80-100 fl
+    lowest_MCV = 50
+    highest_MCV = 300
+
+    Erythrocytes_codeset_id=[3020416]  # normal people: 4-6 million cells per microliter 
+    lowest_Erythrocytes = 1
+    highest_Erythrocytes = 20
+
+    MCHC_codeset_id=[3009744]  # normal people: 31-37 g/dL 
+    lowest_MCHC = 10
+    highest_MCHC = 60
+
+    Systolic_blood_pressure_codeset_id=[3004249]   
+    lowest_Systolic_blood_pressure = 0
+    highest_Systolic_blood_pressure = 500
+
+    Diastolic_blood_pressure_codeset_id=[3012888,4154790]   
+    lowest_Diastolic_blood_pressure = 0
+    highest_Diastolic_blood_pressure = 500
+    
+    heart_rate_codeset_id=[3027018]  # normal people: 60-100 per min
+    lowest_heart_rate = 10
+    highest_heart_rate = 300
+
+    temperature_codeset_id=[3020891]  # normal people: 36-38
+    lowest_temperature = 35
+    highest_temperature = 43
+    
+    blood_Glucose_codeset_id=[3004501]  # normal people: 
+    lowest_blood_Glucose = 50
+    highest_blood_Glucose = 500
+    
+    blood_Platelets_codeset_id=[3024929]  # normal people: 130-459
+    lowest_blood_Platelets = 50
+    highest_blood_Platelets = 1000
+
+    blood_Hematocrit_codeset_id=[3023314]  # normal people: 30-54
+    lowest_blood_Hematocrit = 10
+    highest_blood_Hematocrit = 150
+    
+    blood_Leukocytes_codeset_id=[3000905]  # normal people: 4-11
+    lowest_blood_Leukocytes = 1
+    highest_blood_Leukocytes = 30
+
+    blood_Bilirubin_codeset_id=[3024128]  # normal people: 0.1-1.5
+    lowest_blood_Bilirubin = 0.02
+    highest_blood_Bilirubin = 5
+
+    blood_Albumin_codeset_id=[3024561]  # normal people: 3.5-5.0
+    lowest_blood_Albumin = 1
+    highest_blood_Albumin = 30
+    
+    ####
+    blood_Troponin_codeset_id=[3033745]  # normal people: 0-0.01
+    lowest_blood_Troponin = 0
+    highest_blood_Troponin = 1
+
+    blood_Procalcitonin_codeset_id=[44817130]  # normal people: 0-0.1
+    lowest_blood_Procalcitonin = 0
+    highest_blood_Procalcitonin = 1
 
     bmi_codeset_ids = list(concepts_df.where(
         (concepts_df.concept_set_name=="body mass index") 
@@ -3042,7 +3179,81 @@ def everyone_measurements_of_interest_testing(measurement_testing, everyone_coho
         .withColumn('Recorded_BMI', F.when(df.measurement_concept_id.isin(bmi_codeset_ids) & df.harmonized_value_as_number.between(lowest_acceptable_BMI, highest_acceptable_BMI), df.harmonized_value_as_number).otherwise(0)) \
         .withColumn('height', F.when(df.measurement_concept_id.isin(height_codeset_ids) & df.harmonized_value_as_number.between(lowest_acceptable_height, highest_acceptable_height), df.harmonized_value_as_number).otherwise(0)) \
         .withColumn('weight', F.when(df.measurement_concept_id.isin(weight_codeset_ids) & df.harmonized_value_as_number.between(lowest_acceptable_weight, highest_acceptable_weight), df.harmonized_value_as_number).otherwise(0)) 
-        
+
+    blood_oxygen_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('Oxygen_saturation', F.when(df.measurement_concept_id.isin(blood_oxygen_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_oxygen, highest_blood_oxygen), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_sodium_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_sodium', F.when(df.measurement_concept_id.isin(blood_sodium_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_sodium, highest_blood_sodium), df.harmonized_value_as_number).otherwise(0))
+
+   
+    blood_hemoglobin_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_hemoglobin', F.when(df.measurement_concept_id.isin(blood_hemoglobin_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_hemoglobin, highest_blood_hemoglobin), df.harmonized_value_as_number).otherwise(0))
+    
+    respiratory_rate_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('respiratory_rate', F.when(df.measurement_concept_id.isin(respiratory_rate_codeset_id) & df.harmonized_value_as_number.between(lowest_respiratory_rate, highest_respiratory_rate), df.harmonized_value_as_number).otherwise(0))
+ 
+    blood_Creatinine_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Creatinine', F.when(df.measurement_concept_id.isin(blood_Creatinine_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Creatinine, highest_blood_Creatinine), df.harmonized_value_as_number).otherwise(0))
+
+    blood_UreaNitrogen_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_UreaNitrogen', F.when(df.measurement_concept_id.isin(blood_UreaNitrogen_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_UreaNitrogen, highest_blood_UreaNitrogen), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_Potassium_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Potassium', F.when(df.measurement_concept_id.isin(blood_Potassium_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Potassium, highest_blood_Potassium), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_Chloride_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Chloride', F.when(df.measurement_concept_id.isin(blood_Chloride_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Chloride, highest_blood_Chloride), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_Calcium_df =  df.where(F.col('value_as_number').isNotNull()) \
+        .withColumn('blood_Calcium', F.when(df.measurement_concept_id.isin(blood_Calcium_codeset_id) & df.value_as_number.between(lowest_blood_Calcium, highest_blood_Calcium), df.value_as_number).otherwise(0))
+    
+    MCV_df =  df.where(F.col('value_as_number').isNotNull()) \
+        .withColumn('MCV', F.when(df.measurement_concept_id.isin(MCV_codeset_id) & df.value_as_number.between(lowest_MCV, highest_MCV), df.value_as_number).otherwise(0))
+    
+    Erythrocytes_df =  df.where(F.col('value_as_number').isNotNull()) \
+        .withColumn('Erythrocytes', F.when(df.measurement_concept_id.isin(Erythrocytes_codeset_id) & df.value_as_number.between(lowest_Erythrocytes, highest_Erythrocytes), df.value_as_number).otherwise(0))
+    
+    MCHC_df =  df.where(F.col('value_as_number').isNotNull()) \
+        .withColumn('MCHC', F.when(df.measurement_concept_id.isin(MCHC_codeset_id) & df.value_as_number.between(lowest_MCHC, highest_MCHC), df.value_as_number).otherwise(0))
+    
+    Systolic_blood_pressure_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('Systolic_blood_pressure', F.when(df.measurement_concept_id.isin(Systolic_blood_pressure_codeset_id) & df.harmonized_value_as_number.between(lowest_Systolic_blood_pressure, highest_Systolic_blood_pressure), df.harmonized_value_as_number).otherwise(0))
+    
+    Diastolic_blood_pressure_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('Diastolic_blood_pressure', F.when(df.measurement_concept_id.isin(Diastolic_blood_pressure_codeset_id) & df.harmonized_value_as_number.between(lowest_Diastolic_blood_pressure, highest_Diastolic_blood_pressure), df.harmonized_value_as_number).otherwise(0))
+
+    heart_rate_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('heart_rate', F.when(df.measurement_concept_id.isin(heart_rate_codeset_id) & df.harmonized_value_as_number.between(lowest_heart_rate, highest_heart_rate), df.harmonized_value_as_number).otherwise(0))
+
+    temperature_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('temperature', F.when(df.measurement_concept_id.isin(temperature_codeset_id) & df.harmonized_value_as_number.between(lowest_temperature, highest_temperature), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_Glucose_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Glucose', F.when(df.measurement_concept_id.isin(blood_Glucose_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Glucose, highest_blood_Glucose), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_Platelets_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Platelets', F.when(df.measurement_concept_id.isin(blood_Platelets_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Platelets, highest_blood_Platelets), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_Hematocrit_df =  df.where(F.col('value_as_number').isNotNull()) \
+        .withColumn('blood_Hematocrit', F.when(df.measurement_concept_id.isin(blood_Hematocrit_codeset_id) & df.value_as_number.between(lowest_blood_Hematocrit, highest_blood_Hematocrit), df.value_as_number).otherwise(0))
+    
+    blood_Leukocytes_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Leukocytes', F.when(df.measurement_concept_id.isin(blood_Leukocytes_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Leukocytes, highest_blood_Leukocytes), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_Bilirubin_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Bilirubin', F.when(df.measurement_concept_id.isin(blood_Bilirubin_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Bilirubin, highest_blood_Bilirubin), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_Albumin_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Albumin', F.when(df.measurement_concept_id.isin(blood_Albumin_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Albumin, highest_blood_Albumin), df.harmonized_value_as_number).otherwise(0))
+    
+    ####
+    blood_Troponin_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Troponin', F.when(df.measurement_concept_id.isin(blood_Troponin_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Troponin, highest_blood_Troponin), df.harmonized_value_as_number).otherwise(0))
+    
+    blood_Procalcitonin_df =  df.where(F.col('harmonized_value_as_number').isNotNull()) \
+        .withColumn('blood_Procalcitonin', F.when(df.measurement_concept_id.isin(blood_Procalcitonin_codeset_id) & df.harmonized_value_as_number.between(lowest_blood_Procalcitonin, highest_blood_Procalcitonin), df.harmonized_value_as_number).otherwise(0))
+
     labs_df = df.withColumn('PCR_AG_Pos', F.when(df.measurement_concept_id.isin(pcr_ag_test_ids) & df.value_as_concept_id.isin(covid_positive_measurement_ids), 1).otherwise(0)) \
         .withColumn('PCR_AG_Neg', F.when(df.measurement_concept_id.isin(pcr_ag_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0)) \
         .withColumn('Antibody_Pos', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_positive_measurement_ids), 1).otherwise(0)) \
@@ -3061,6 +3272,102 @@ def everyone_measurements_of_interest_testing(measurement_testing, everyone_coho
     F.max('Antibody_Neg').alias('Antibody_Neg'),
     F.max('SEX').alias('SEX'))
 
+    blood_oxygen_df = blood_oxygen_df.groupby('person_id', 'visit_date').agg(
+    F.max('Oxygen_saturation').alias('Oxygen_saturation')
+    )
+
+    blood_sodium_df = blood_sodium_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_sodium').alias('blood_sodium')
+    )
+
+    blood_hemoglobin_df = blood_hemoglobin_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_hemoglobin').alias('blood_hemoglobin')
+    )
+
+    respiratory_rate_df = respiratory_rate_df.groupby('person_id', 'visit_date').agg(
+    F.max('respiratory_rate').alias('respiratory_rate')
+    )
+
+    blood_Creatinine_df = blood_Creatinine_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Creatinine').alias('blood_Creatinine')
+    )
+
+    blood_UreaNitrogen_df = blood_UreaNitrogen_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_UreaNitrogen').alias('blood_UreaNitrogen')
+    )
+
+    blood_Potassium_df = blood_Potassium_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Potassium').alias('blood_Potassium')
+    )
+
+    blood_Chloride_df = blood_Chloride_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Chloride').alias('blood_Chloride')
+    )
+
+    blood_Calcium_df = blood_Calcium_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Calcium').alias('blood_Calcium')
+    )
+
+    MCV_df = MCV_df.groupby('person_id', 'visit_date').agg(
+    F.max('MCV').alias('MCV')
+    )
+
+    Erythrocytes_df = Erythrocytes_df.groupby('person_id', 'visit_date').agg(
+    F.max('Erythrocytes').alias('Erythrocytes')
+    )
+
+    MCHC_df = MCHC_df.groupby('person_id', 'visit_date').agg(
+    F.max('MCHC').alias('MCHC')
+    )
+
+    Systolic_blood_pressure_df = Systolic_blood_pressure_df.groupby('person_id', 'visit_date').agg(
+    F.max('Systolic_blood_pressure').alias('Systolic_blood_pressure')
+    )
+
+    Diastolic_blood_pressure_df = Diastolic_blood_pressure_df.groupby('person_id', 'visit_date').agg(
+    F.max('Diastolic_blood_pressure').alias('Diastolic_blood_pressure')
+    )
+
+    heart_rate_df = heart_rate_df.groupby('person_id', 'visit_date').agg(
+    F.max('heart_rate').alias('heart_rate')
+    )
+
+    temperature_df = temperature_df.groupby('person_id', 'visit_date').agg(
+    F.max('temperature').alias('temperature')
+    )
+    
+    blood_Glucose_df = blood_Glucose_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Glucose').alias('blood_Glucose')
+    )
+    
+    blood_Platelets_df = blood_Platelets_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Platelets').alias('blood_Platelets')
+    )
+
+    blood_Hematocrit_df = blood_Hematocrit_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Hematocrit').alias('blood_Hematocrit')
+    )
+
+    blood_Leukocytes_df = blood_Leukocytes_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Leukocytes').alias('blood_Leukocytes')
+    )
+
+    blood_Bilirubin_df = blood_Bilirubin_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Bilirubin').alias('blood_Bilirubin')
+    )
+
+    blood_Albumin_df = blood_Albumin_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Albumin').alias('blood_Albumin')
+    )
+    ###
+    blood_Troponin_df = blood_Troponin_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Troponin').alias('blood_Troponin')
+    )
+    
+    blood_Procalcitonin_df = blood_Procalcitonin_df.groupby('person_id', 'visit_date').agg(
+    F.max('blood_Procalcitonin').alias('blood_Procalcitonin')
+    )
+
     #add a calculated BMI for each visit date when height and weight available.  Note that if only one is available, it will result in zero
     #subsequent filter out rows that would have resulted from unreasonable calculated_BMI being used as best_BMI for the visit 
     BMI_df = BMI_df.withColumn('calculated_BMI', (BMI_df.weight/(BMI_df.height*BMI_df.height)))
@@ -3072,7 +3379,7 @@ def everyone_measurements_of_interest_testing(measurement_testing, everyone_coho
     BMI_df = BMI_df.withColumn('OBESITY', F.when(BMI_df.BMI_rounded>=30, 1).otherwise(0))
 
     #join BMI_df with labs_df to retain all lab results with only reasonable BMI_rounded and OBESITY flags
-    df = labs_df.join(BMI_df, on=['person_id', 'visit_date'], how='left')
+    df = labs_df.join(BMI_df, on=['person_id', 'visit_date'], how='left').join(blood_oxygen_df, on=['person_id', 'visit_date'], how='left').join(blood_sodium_df, on=['person_id', 'visit_date'], how='left').join(blood_hemoglobin_df, on=['person_id', 'visit_date'], how='left').join(respiratory_rate_df, on=['person_id', 'visit_date'], how='left').join(blood_Creatinine_df, on=['person_id', 'visit_date'], how='left').join(blood_UreaNitrogen_df, on=['person_id', 'visit_date'], how='left').join(blood_Potassium_df, on=['person_id', 'visit_date'], how='left').join(blood_Chloride_df, on=['person_id', 'visit_date'], how='left').join(blood_Calcium_df, on=['person_id', 'visit_date'], how='left').join(MCV_df, on=['person_id', 'visit_date'], how='left').join(Erythrocytes_df, on=['person_id', 'visit_date'], how='left').join(MCHC_df, on=['person_id', 'visit_date'], how='left').join(Systolic_blood_pressure_df, on=['person_id', 'visit_date'], how='left').join(Diastolic_blood_pressure_df, on=['person_id', 'visit_date'], how='left').join(heart_rate_df, on=['person_id', 'visit_date'], how='left').join(temperature_df, on=['person_id', 'visit_date'], how='left').join(blood_Glucose_df, on=['person_id', 'visit_date'], how='left').join(blood_Platelets_df, on=['person_id', 'visit_date'], how='left').join(blood_Hematocrit_df, on=['person_id', 'visit_date'], how='left').join(blood_Leukocytes_df, on=['person_id', 'visit_date'], how='left').join(blood_Bilirubin_df, on=['person_id', 'visit_date'], how='left').join(blood_Albumin_df, on=['person_id', 'visit_date'], how='left').join(blood_Troponin_df, on=['person_id', 'visit_date'], how='left').join(blood_Procalcitonin_df, on=['person_id', 'visit_date'], how='left')
 
     return df
 
@@ -3128,22 +3435,20 @@ def everyone_observations_of_interest(observation, everyone_cohort_de_id, custom
     custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
     everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
-    observation_testing=Input(rid="ri.foundry.main.dataset.fc1ce22e-9cf6-4335-8ca7-aa8c733d506d")
+    observation_testing_copy=Input(rid="ri.foundry.main.dataset.9834f887-c80e-478c-b538-5bb39b9db6a7")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_observations_of_interest_testing(observation_testing, everyone_cohort_de_id_testing, customized_concept_set_input_testing, custom_concept_set_members):
+def everyone_observations_of_interest_testing(observation_testing_copy, everyone_cohort_de_id_testing, customized_concept_set_input_testing, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
-    everyone_cohort_de_id = everyone_cohort_de_id_testing
-    customized_concept_set_input = customized_concept_set_input_testing
    
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id_testing.select('person_id')
     #filter observations table to only cohort patients    
-    observations_df = observation_testing \
+    observations_df = observation_testing_copy \
         .select('person_id','observation_date','observation_concept_id') \
         .where(F.col('observation_date').isNotNull()) \
         .withColumnRenamed('observation_date','visit_date') \
@@ -3151,18 +3456,18 @@ def everyone_observations_of_interest_testing(observation_testing, everyone_coho
         .join(persons,'person_id','inner')
 
     #filter fusion sheet for concept sets and their future variable names that have concepts in the observations domain
-    fusion_df = customized_concept_set_input \
-        .filter(customized_concept_set_input.domain.contains('observation')) \
+    fusion_df = customized_concept_set_input_testing \
+        .filter(customized_concept_set_input_testing.domain.contains('observation')) \
         .select('concept_set_name','indicator_prefix')
     #filter concept set members table to only concept ids for the observations of interest
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
-        .where(F.col('is_most_recent_version')=='true') \
+        .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix')
 
     #find observations information based on matching concept ids for observations of interest
-    df = observations_df.join(concepts_df, 'concept_id', 'right')
+    df = observations_df.join(concepts_df, 'concept_id', 'inner')
     #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for observations of interest    
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
 
@@ -3221,22 +3526,20 @@ def everyone_procedures_of_interest(everyone_cohort_de_id, procedure_occurrence,
     custom_concept_set_members=Input(rid="ri.foundry.main.dataset.fca16979-a1a8-4e62-9661-7adc1c413729"),
     customized_concept_set_input_testing=Input(rid="ri.foundry.main.dataset.842d6169-dd15-44de-9955-c978ffb1c801"),
     everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
-    procedure_occurrence_testing=Input(rid="ri.foundry.main.dataset.88523aaa-75c3-4b55-a79a-ebe27e40ba4f")
+    procedure_occurrence_testing_copy=Input(rid="ri.foundry.main.dataset.2d76588c-fe75-4d07-8044-f054444ec728")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
 #Last Update - 5/6/22
 #Description - This nodes filter the source OMOP tables for rows that have a standard concept id associated with one of the concept sets described in the data dictionary in the README through the use of a fusion sheet.  Indicator names for these variables are assigned, and the indicators are collapsed to unique instances on the basis of patient and visit date.
 
-def everyone_procedures_of_interest_testing(everyone_cohort_de_id_testing, procedure_occurrence_testing, customized_concept_set_input_testing, custom_concept_set_members):
+def everyone_procedures_of_interest_testing(everyone_cohort_de_id_testing, procedure_occurrence_testing_copy, customized_concept_set_input_testing, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
-    everyone_cohort_de_id = everyone_cohort_de_id_testing
-    customized_concept_set_input = customized_concept_set_input_testing
   
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id_testing.select('person_id')
     #filter procedure occurrence table to only cohort patients    
-    procedures_df = procedure_occurrence_testing \
+    procedures_df = procedure_occurrence_testing_copy \
         .select('person_id','procedure_date','procedure_concept_id') \
         .where(F.col('procedure_date').isNotNull()) \
         .withColumnRenamed('procedure_date','visit_date') \
@@ -3244,18 +3547,18 @@ def everyone_procedures_of_interest_testing(everyone_cohort_de_id_testing, proce
         .join(persons,'person_id','inner')
 
     #filter fusion sheet for concept sets and their future variable names that have concepts in the procedure domain
-    fusion_df = customized_concept_set_input \
-        .filter(customized_concept_set_input.domain.contains('procedure')) \
+    fusion_df = customized_concept_set_input_testing \
+        .filter(customized_concept_set_input_testing.domain.contains('procedure')) \
         .select('concept_set_name','indicator_prefix')
     #filter concept set members table to only concept ids for the procedures of interest
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
-        .where(F.col('is_most_recent_version')=='true') \
+        .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix')
  
     #find procedure occurrence information based on matching concept ids for procedures of interest
-    df = procedures_df.join(concepts_df, 'concept_id', 'right')
+    df = procedures_df.join(concepts_df, 'concept_id', 'inner')
     #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for procedures of interest    
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
 
@@ -3328,14 +3631,13 @@ def everyone_vaccines_of_interest(everyone_cohort_de_id, Vaccine_fact_de_identif
     first_covid_positive_testing=Input(rid="ri.foundry.main.dataset.5b84887d-8fd0-49bf-969e-6a78dc3060ca")
 )
 def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine_fact_de_identified_testing, first_covid_positive_testing):
-    everyone_cohort_de_id = everyone_cohort_de_id_testing
     vaccine_fact_de_identified = Vaccine_fact_de_identified_testing
     
     persons = everyone_cohort_de_id_testing.select('person_id')
     vax_df = Vaccine_fact_de_identified_testing.select('person_id', 'vaccine_txn', '1_vax_date', '2_vax_date', '3_vax_date', '4_vax_date') \
         .join(persons, 'person_id', 'inner')
         
-    vax_switch = Vaccine_fact_de_identified.select('person_id', '1_vax_type', 'date_diff_1_2') \
+    vax_switch = Vaccine_fact_de_identified_testing.select('person_id', '1_vax_type', 'date_diff_1_2') \
         .withColumnRenamed('date_diff_1_2', 'DATE_DIFF_1_2') \
         .withColumn("1_VAX_JJ", F.when(F.col('1_vax_type') == 'janssen', 1).otherwise(0)) \
         .withColumn("1_VAX_PFIZER", F.when(F.col('1_vax_type') == 'pfizer', 1).otherwise(0)) \
@@ -3344,15 +3646,19 @@ def everyone_vaccines_of_interest_testing(everyone_cohort_de_id_testing, Vaccine
 
     first_dose = vax_df.select('person_id', '1_vax_date') \
         .withColumnRenamed('1_vax_date', 'visit_date') \
+        .withColumn('1_vax_dose', F.lit(1)) \
         .where(F.col('visit_date').isNotNull())
     second_dose = vax_df.select('person_id', '2_vax_date') \
         .withColumnRenamed('2_vax_date', 'visit_date') \
+        .withColumn('2_vax_dose', F.lit(1)) \
         .where(F.col('visit_date').isNotNull())        
     third_dose = vax_df.select('person_id', '3_vax_date') \
         .withColumnRenamed('3_vax_date', 'visit_date') \
+        .withColumn('3_vax_dose', F.lit(1)) \
         .where(F.col('visit_date').isNotNull())
     fourth_dose = vax_df.select('person_id', '4_vax_date') \
         .withColumnRenamed('4_vax_date', 'visit_date') \
+        .withColumn('4_vax_dose', F.lit(1)) \
         .where(F.col('visit_date').isNotNull())
 
     df = first_dose.join(second_dose, on=['person_id', 'visit_date'], how='outer') \
@@ -3458,6 +3764,24 @@ def first_covid_positive_testing(everyone_conditions_of_interest_testing):
         .select('person_id', F.first('visit_date').over(w).alias('first_covid_positive')) \
         .distinct()
 
+    return df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.71a84ecb-f5da-4847-937b-42a7fb9e1272"),
+    location=Input(rid="ri.foundry.main.dataset.4805affe-3a77-4260-8da5-4f9ff77f51ab"),
+    location_testing=Input(rid="ri.foundry.main.dataset.06b728e0-0262-4a7a-b9b7-fe91c3f7da34")
+)
+def location_testing_copy(location_testing, location):
+    return location_testing if LOAD_TEST == 1 else location
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.f756c161-a369-4a22-9591-03ace0f5d1a5"),
+    manifest_safe_harbor=Input(rid="ri.foundry.main.dataset.b4407989-1851-4e07-a13f-0539fae10f26"),
+    manifest_safe_harbor_testing=Input(rid="ri.foundry.main.dataset.7a5c5585-1c69-4bf5-9757-3fd0d0a209a2")
+)
+def manifest_safe_harbor_testing_copy(manifest_safe_harbor_testing, manifest_safe_harbor):
+    return manifest_safe_harbor_testing if LOAD_TEST == 1 else manifest_safe_harbor
+
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.d5cfe420-8f15-45eb-af08-2b12fe71798f"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
@@ -3553,6 +3877,22 @@ def measurement_analysis_tool(measurement, Long_COVID_Silver_Standard):
     
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.92566631-b0d5-4fab-8a14-5c3d0d6ad560"),
+    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7"),
+    measurement_testing=Input(rid="ri.foundry.main.dataset.b7749e49-cf01-4d0a-a154-2f00eecab21e")
+)
+def measurement_testing_copy(measurement_testing, measurement):
+    return measurement_testing if LOAD_TEST == 1 else measurement
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.05de4355-6100-463e-930a-0e9d3c8a8baa"),
+    microvisits_to_macrovisits=Input(rid="ri.foundry.main.dataset.d77a701f-34df-48a1-a71c-b28112a07ffa"),
+    microvisits_to_macrovisits_testing=Input(rid="ri.foundry.main.dataset.f5008fa4-e736-4244-88e1-1da7a68efcdb")
+)
+def microvisits_to_macrovisits_testing_copy(microvisits_to_macrovisits_testing, microvisits_to_macrovisits):
+    return microvisits_to_macrovisits_testing if LOAD_TEST == 1 else microvisits_to_macrovisits
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.d39564f3-817f-4b8a-a8b6-81d4f8fd6bf1"),
     recent_visits_2=Input(rid="ri.foundry.main.dataset.bf18056e-2e27-4f2a-af1a-7b6cabc2a9cf")
 )
@@ -3609,6 +3949,14 @@ def observation_table_analysis_1(observation, Long_COVID_Silver_Standard):
     return r
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.9834f887-c80e-478c-b538-5bb39b9db6a7"),
+    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
+    observation_testing=Input(rid="ri.foundry.main.dataset.fc1ce22e-9cf6-4335-8ca7-aa8c733d506d")
+)
+def observation_testing_copy(observation_testing, observation):
+    return observation_testing if LOAD_TEST == 1 else observation
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.2f6ebf73-3a2d-43dc-ace9-da56da4b1743"),
     everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf")
 )
@@ -3631,6 +3979,22 @@ def person_information(everyone_cohort_de_id):
 
     # Return
     return df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.543e1d80-626e-4a3d-a196-d0c7b434fb41"),
+    person=Input(rid="ri.foundry.main.dataset.f71ffe18-6969-4a24-b81c-0e06a1ae9316"),
+    person_testing=Input(rid="ri.foundry.main.dataset.06629068-25fc-4802-9b31-ead4ed515da4")
+)
+def person_testing_copy(person_testing, person):
+    return person_testing if LOAD_TEST == 1 else person
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.2d76588c-fe75-4d07-8044-f054444ec728"),
+    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3"),
+    procedure_occurrence_testing=Input(rid="ri.foundry.main.dataset.88523aaa-75c3-4b55-a79a-ebe27e40ba4f")
+)
+def procedure_occurrence_testing_copy(procedure_occurrence_testing, procedure_occurrence):
+    return procedure_occurrence_testing if LOAD_TEST == 1 else procedure_occurrence
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.166746be-24ec-4f37-84e0-141c8e56706b"),
@@ -4174,9 +4538,18 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
 
     Outcome = list(Outcome_df["outcome"])
 
+    for col in all_patients_summary_fact_table_de_id.columns:
+        if col not in all_patients_summary_fact_table_de_id_testing.columns:
+            print(col, " not in testing set.")
+            all_patients_summary_fact_table_de_id_testing[col] = 0 
+            
     Training_and_Holdout = all_patients_summary_fact_table_de_id[cols].fillna(0.0).sort_values('person_id')
-    #Testing = all_patients_summary_fact_table_de_id_testing[cols].fillna(0.0)
-    X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+    Testing = all_patients_summary_fact_table_de_id_testing[cols].fillna(0.0).sort_values('person_id')
+    if LOAD_TEST == 0:
+        X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+    else:
+        X_train_no_ind, y_train = Training_and_Holdout, Outcome
+        X_test_no_ind, y_test = Testing, None
     X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
 
     lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
@@ -4212,10 +4585,7 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     gb_test_preds = gbc.predict_proba(X_test)[:, 1]
     nnc_test_preds = nnc.predict_proba(nn_scaler.transform(X_test))[:, 1]
 
-    print("LR Training Classification Report:\n{}".format(classification_report(y_train, np.where(lr_train_preds > 0.5, 1, 0))))
-
-    #test_df = 
-    test_predictions = pd.DataFrame.from_dict({
+    predictions = pd.DataFrame.from_dict({
         'person_id': list(X_test_no_ind["person_id"]),
         'lr_outcome': lr_test_preds.tolist(),
         'lr2_outcome': lr2_test_preds.tolist(),
@@ -4224,16 +4594,12 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
         'nn_outcome': nnc_test_preds.tolist(),
     }, orient='columns')
     
-    test_predictions = test_predictions.merge(Outcome_df, on="person_id", how="left")
+    if MERGE_LABEL  == 1:
+        predictions = predictions.merge(Outcome_df, on="person_id", how="left")
     outcomes = ['lr_outcome', 'lr2_outcome', 'rf_outcome', 'gb_outcome', 'nn_outcome']
-    test_predictions['ens_outcome'] = test_predictions.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
+    predictions['ens_outcome'] = predictions.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
 
-    # predictions = pd.DataFrame.from_dict({
-    #     'person_id': list(all_patients_summary_fact_table_de_id_testing["person_id"]),
-    #     'outcome_likelihood': preds.tolist()
-    # }, orient='columns')
-
-    return test_predictions
+    return predictions
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.9d1a79f6-7627-4ee4-abc0-d6d6179c2f26"),
