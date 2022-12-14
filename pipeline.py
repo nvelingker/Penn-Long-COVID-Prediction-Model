@@ -41,6 +41,8 @@ import torch.nn as nn
 import numpy as np
 import math
 
+import scipy.stats
+
 # Set default dtype
 torch.set_default_dtype(torch.float32)
 
@@ -50,6 +52,32 @@ LABEL_SETUPS = [
     "after", # Only take `pasc_code_after_four_weeks` as label
     "both", # Take the `or` of both `pasc_code_prior_four_weeks` and `pasc_code_after_four_weeks` as label
 ]
+
+class mTan_model(nn.Module):
+    def __init__(self, rec, dec, classifier, latent_dim, k_iwae, device):
+        super(mTan_model, self).__init__()
+        self.rec = rec
+        self.dec = dec
+        self.classifier = classifier
+        self.device = device
+        self.latent_dim = latent_dim
+        self.k_iwae = k_iwae
+
+    def forward(self, *input):
+        observed_data, observed_mask, observed_tp, person_info_batch = input
+        batch_len  = observed_data.shape[0]
+        # observed_data, observed_mask, observed_tp \
+        #     = train_batch[:, :, :dim], train_batch[:, :, dim:2*dim], train_batch[:, :, -1]
+        out = self.rec(torch.cat((observed_data, observed_mask), 2), observed_tp)
+        qz0_mean, qz0_logvar = out[:, :, :self.latent_dim], out[:, :, self.latent_dim:]
+        epsilon = torch.randn(self.k_iwae, qz0_mean.shape[0], qz0_mean.shape[1], qz0_mean.shape[2]).to(self.device)
+        z0 = epsilon * torch.exp(.5 * qz0_logvar) + qz0_mean
+        z0 = z0.view(-1, qz0_mean.shape[1], qz0_mean.shape[2])
+        pred_y = self.classifier(z0, person_info_batch)
+        # pred_x = self.dec(
+        #     z0, observed_tp[None, :, :].repeat(k_iwae, 1, 1).view(-1, observed_tp.shape[1]))
+        # pred_x = pred_x.view(k_iwae, batch_len, pred_x.shape[1], pred_x.shape[2]) #nsample, batch, 
+        return pred_y
 
 def convert_type(df, all_types):
     column_names = df.columns
@@ -311,7 +339,8 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
     recent_visit = recent_visit.set_index(["person_id", "visit_date"])
     label = label.set_index("person_id")
     all_person_ids = list(all_person_info.index.unique())
-
+    all_person_ids.sort()
+    print("first 10 person ids::", all_person_ids[0:10])
     # all_person_ids = list(all_person_info.index.unique())
     visit_tensor_ls = []
     mask_ls= []
@@ -590,13 +619,29 @@ class LongCOVIDVisitsDataset2(torch.utils.data.Dataset):
         visit_tensor_ls = [item[0] for item in data]
         mask_ls = [item[1] for item in data]
         label_tensor_ls = [item[4] for item in data]
-        person_info_ls = [item[3] for item in data]
+        person_info_ls = [item[3].view(-1) for item in data]
         data_min = [item[5] for item in data][0]
         data_max = [item[6] for item in data][0]
         batched_data_tensor, batched_label_tensor = variable_time_collate_fn(time_step_ls, visit_tensor_ls, mask_ls, label_tensor_ls, device=torch.device("cpu"), data_min=data_min, data_max=data_max)
+        # batched_person_=[]
+        batched_person_info = torch.stack(person_info_ls)
         # batched_data_tensor = torch.stack([item[0] for item in data])
         # batched_label_tensor = torch.stack([item[1] for item in data])
-        return batched_data_tensor, batched_label_tensor
+        return batched_data_tensor, batched_label_tensor, batched_person_info
+
+    # @staticmethod
+    # def collate_fn(data):
+    #     time_step_ls = [item[2] for item in data]
+    #     visit_tensor_ls = [item[0] for item in data]
+    #     mask_ls = [item[1] for item in data]
+    #     label_tensor_ls = [item[4] for item in data]
+    #     person_info_ls = [item[3] for item in data]
+    #     data_min = [item[5] for item in data][0]
+    #     data_max = [item[6] for item in data][0]
+    #     batched_data_tensor, batched_label_tensor = variable_time_collate_fn(time_step_ls, visit_tensor_ls, mask_ls, label_tensor_ls, device=torch.device("cpu"), data_min=data_min, data_max=data_max)
+    #     # batched_data_tensor = torch.stack([item[0] for item in data])
+    #     # batched_label_tensor = torch.stack([item[1] for item in data])
+    #     return batched_data_tensor, batched_label_tensor
 # class LongCOVIDVisitsDataset2(torch.utils.data.Dataset):
 #     def __init__(self, visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max, setup="both"):
 #         self.setup = setup
@@ -662,7 +707,7 @@ class LongCOVIDVisitsLSTMModel(torch.nn.Module):
 
 class create_classifier(nn.Module):
  
-    def __init__(self, latent_dim, nhidden=16, N=2):
+    def __init__(self, latent_dim, nhidden=16, N=2, has_static=False, static_input_dim=0):
         super(create_classifier, self).__init__()
         self.gru_rnn = nn.GRU(latent_dim, nhidden, batch_first=True)
         self.classifier = nn.Sequential(
@@ -671,10 +716,28 @@ class create_classifier(nn.Module):
             nn.Linear(20, 20),
             nn.ReLU(),
             nn.Linear(20, N))
+
+        if has_static:
+            self.static_feat = nn.Sequential(
+                nn.Linear(static_input_dim, 20),
+                nn.ReLU(),
+                nn.Linear(20, nhidden))
+            self.classifier = nn.Sequential(
+                nn.Linear(2*nhidden, 20),
+                nn.ReLU(),
+                nn.Linear(20, 20),
+                nn.ReLU(),
+                nn.Linear(20, N))
+        
        
-    def forward(self, z):
+    def forward(self, z, static_x=None):
         _, out = self.gru_rnn(z)
-        return self.classifier(out.squeeze(0))
+        # if static_x is not None:
+        if static_x is not None:
+            static_feat = self.static_feat(static_x)
+            return self.classifier(torch.cat([out.squeeze(0), static_feat], dim = -1))
+        else:
+            return self.classifier(out.squeeze(0))
 
 class enc_mtan_rnn(nn.Module):
     def __init__(self, input_dim, query, latent_dim=2, nhidden=16, 
@@ -822,8 +885,10 @@ def evaluate_classifier(model, test_loader, dec=None, latent_dim=None, classify_
     pred = []
     true = []
     test_loss = 0
-    for test_batch, label in test_loader:
-        test_batch, label = test_batch.float().to(device), label.to(device)
+    for item in test_loader:
+        test_batch, label, person_info_batch = item
+        # train_batch, label, person_info_batch = item
+        test_batch, label, person_info_batch = test_batch.float().to(device), label.to(device), person_info_batch.float().to(device)
         batch_len = test_batch.shape[0]
         observed_data, observed_mask, observed_tp \
             = test_batch[:, :, :dim], test_batch[:, :, dim:2*dim], test_batch[:, :, -1]
@@ -844,9 +909,9 @@ def evaluate_classifier(model, test_loader, dec=None, latent_dim=None, classify_
                     pred_x = dec(z0, observed_tp[None, :, :].repeat(
                         num_sample, 1, 1).view(-1, observed_tp.shape[1]))
                     #pred_x = pred_x.view(num_sample, batch_len, pred_x.shape[1], pred_x.shape[2])
-                    out = classifier(pred_x)
+                    out = classifier(pred_x, person_info_batch)
                 else:
-                    out = classifier(z0)
+                    out = classifier(z0, person_info_batch)
             if classify_pertp:
                 N = label.size(-1)
                 out = out.view(-1, N)
@@ -878,7 +943,7 @@ def evaluate_classifier(model, test_loader, dec=None, latent_dim=None, classify_
     recall = recall_score(true.astype(int), pred_labels)
     precision = precision_score(true.astype(int), pred_labels)
     print("validation classification Report:\n{}".format(classification_report(true.astype(int), pred_labels)))
-    return test_loss/pred.shape[0], acc, auc, recall, precision
+    return test_loss/pred.shape[0], acc, auc, recall, precision, true, pred_labels
 
 def train_mTans(lr, norm, std, alpha, k_iwae, dim, latent_dim, rec, dec, classifier, epochs, train_loader, val_loader, is_kl=True):
     best_val_loss = float('inf')
@@ -889,7 +954,7 @@ def train_mTans(lr, norm, std, alpha, k_iwae, dim, latent_dim, rec, dec, classif
     device = torch.device(
         'cuda' if torch.cuda.is_available() else 'cpu')
     print("device::", device)
-    val_loss, val_acc, val_auc, val_recall, val_precision =         evaluate_classifier(rec, val_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+    val_loss, val_acc, val_auc, val_recall, val_precision,_,_ =         evaluate_classifier(rec, val_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
     itr=0
     print("validation performance at epoch::", itr)
     print("validation loss::", val_loss)
@@ -919,7 +984,8 @@ def train_mTans(lr, norm, std, alpha, k_iwae, dim, latent_dim, rec, dec, classif
             if local_iter % 200 == 0:
                 print("local iter::", local_iter, len(train_loader))
 
-            train_batch, label = item
+            train_batch, label, person_info_batch = item
+            person_info_batch = person_info_batch.float().to(device)
             train_batch = train_batch.float()
             observed_data, observed_mask, observed_tp = train_batch[:, :, :dim], train_batch[:, :, dim:2*dim], train_batch[:, :, -1]
             observed_data, observed_mask, observed_tp = observed_data.to(device), observed_mask.to(device), observed_tp.to(device)
@@ -934,7 +1000,7 @@ def train_mTans(lr, norm, std, alpha, k_iwae, dim, latent_dim, rec, dec, classif
             epsilon = torch.randn(k_iwae, qz0_mean.shape[0], qz0_mean.shape[1], qz0_mean.shape[2]).to(device)
             z0 = epsilon * torch.exp(.5 * qz0_logvar) + qz0_mean
             z0 = z0.view(-1, qz0_mean.shape[1], qz0_mean.shape[2])
-            pred_y = classifier(z0)
+            pred_y = classifier(z0, person_info_batch)
             pred_x = dec(
                 z0, observed_tp[None, :, :].repeat(k_iwae, 1, 1).view(-1, observed_tp.shape[1]))
             pred_x = pred_x.view(k_iwae, batch_len, pred_x.shape[1], pred_x.shape[2]) #nsample, batch, seqlen, dim
@@ -959,7 +1025,11 @@ def train_mTans(lr, norm, std, alpha, k_iwae, dim, latent_dim, rec, dec, classif
             #                           observed_mask) * batch_len
         # total_time += time.time() - start_time
         # evaluate_classifier(model, test_loader, dec=None, latent_dim=None, classify_pertp=True, classifier=None,dim=41, device='cuda', reconst=False, num_sample=1)
-        val_loss, val_acc, val_auc, val_recall, val_precision = evaluate_classifier(
+        train_loader.shuffle = False
+        train_loss, train_acc, train_auc, train_recall, train_precision,train_true, train_pred_labels = evaluate_classifier(
+            rec, train_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+        train_loader.shuffle = True
+        val_loss, val_acc, val_auc, val_recall, val_precision,true, pred_labels = evaluate_classifier(
             rec, val_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
 
         print("validation performance at epoch::", itr)
@@ -974,6 +1044,10 @@ def train_mTans(lr, norm, std, alpha, k_iwae, dim, latent_dim, rec, dec, classif
             dec_state_dict = dec.state_dict()
             classifier_state_dict = classifier.state_dict()
             optimizer_state_dict = optimizer.state_dict()
+            best_true, best_pred_labels = true.copy(), pred_labels.copy()
+            best_train_true, best_train_pred_labels = train_true.copy(), train_pred_labels.copy()
+
+    return best_true, best_pred_labels, best_train_true, best_train_pred_labels
         # test_loss, test_acc, test_auc = evaluate_classifier(
         #     rec, test_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim)
 
@@ -1224,6 +1298,31 @@ def test_plstm(model, device, test_loader, dim):
         test_loss, correct, total,
         100. * correct / total))
     return correct / total
+
+def evaluate_shapley_value(data_loader, rec, dec, classifier, latent_dim, k_iwae, dim, device):
+
+    shap_values_ls = []
+
+    for item in data_loader:
+
+        train_batch, label, person_info_batch = item
+        person_info_batch = person_info_batch.float().to(device)
+        train_batch = train_batch.float()
+        observed_data, observed_mask, observed_tp = train_batch[:, :, :dim], train_batch[:, :, dim:2*dim], train_batch[:, :, -1]
+        observed_data, observed_mask, observed_tp = observed_data.to(device), observed_mask.to(device), observed_tp.to(device)
+
+        model = mTan_model(rec, dec, classifier, latent_dim, k_iwae, device)
+
+        explainer1 = shap.GradientExplainer(model, [observed_data, observed_mask, observed_tp, person_info_batch])
+
+        # pred_x, pred_y, qz0_mean, qz0_logvar = model((observed_data, observed_mask, observed_tp, person_info_batch))
+        model.train()
+        shap_values1 = explainer1.shap_values([observed_data, observed_mask, observed_tp, person_info_batch])
+        shap_values_ls.append(shap_values1)
+        del model
+
+    print("finish computing shapley values!!")
+    return shap_values_ls
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
@@ -4201,7 +4300,7 @@ def recent_visits_w_nlp_notes_2(recent_visits_2, person_nlp_symptom):
     person_nlp_symptom = person_nlp_symptom.where(person_nlp_symptom["note_date"] >= person_nlp_symptom["six_month_before_last_visit"])
     person_nlp_symptom = person_nlp_symptom.withColumnRenamed("note_date", "visit_date").drop(*["six_month_before_last_visit", "note_id", "visit_occurrence_id"])
     person_nlp_symptom = person_nlp_symptom.withColumn("has_nlp_note", lit(1.0))
-    df = recent_visits_2.join(person_nlp_symptom, on = ["person_id", "visit_date"], how="left").orderBy(*["person_id", "visit_date"])
+    df = recent_visits_2.join(person_nlp_symptom, on = ["person_id", "visit_date"], how="left").orderBy(*["person_id", "visit_date"])#.fillna(0.0)
 
     # person_nlp_symptom = person_nlp_symptom.merge(recent_visits_2[["person_id", "six_month_before_last_visit"]].drop_duplicates(), on="person_id", how="left")
     # person_nlp_symptom = person_nlp_symptom.loc[person_nlp_symptom["note_date"] >= person_nlp_symptom["six_month_before_last_visit"]]
@@ -4329,22 +4428,33 @@ def train_sequential_model(train_valid_split, Long_COVID_Silver_Standard, person
 def train_sequential_model_2(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
     print("start")
     # First get the splitted person ids
-    train_person_ids = train_valid_split.loc[train_valid_split["split"] == "train"]
-    valid_person_ids = train_valid_split.loc[train_valid_split["split"] == "valid"]
+    train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+
+    train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # print(train_recent_visits.show())
+
+    train_person_info = train_person_ids.join(person_information, on="person_id")
+    valid_person_info = valid_person_ids.join(person_information, on="person_id")
+    # train_person_ids = train_valid_split.loc[train_valid_split["split"] == "train"]
+    # valid_person_ids = train_valid_split.loc[train_valid_split["split"] == "valid"]
 
     # Use it to split the data into training x/y and validation x/y
-    train_recent_visits = train_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
-    valid_recent_visits = valid_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
-    train_labels = train_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
-    valid_labels = valid_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+    # train_recent_visits = train_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
+    # valid_recent_visits = valid_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
+    # train_labels = train_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
 
     # Basic person information
-    train_person_info = train_person_ids.merge(person_information, on="person_id")
-    valid_person_info = valid_person_ids.merge(person_information, on="person_id")
+    # train_person_info = train_person_ids.merge(person_information, on="person_id")
+    # valid_person_info = valid_person_ids.merge(person_information, on="person_id")
     
 
     print("start pre-processing!!!")
-    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids, train_person_info, train_recent_visits, train_labels, setup="both")
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids.toPandas(), train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both")
     # torch.save(visit_tensor_ls, "train_visit_tensor_ls")
     # torch.save(mask_ls, "train_mask_ls")
     # torch.save(time_step_ls, "train_mask_ls")
@@ -4353,9 +4463,10 @@ def train_sequential_model_2(train_valid_split, Long_COVID_Silver_Standard, pers
     
     # visit_tensor_ls, mask_ls = remove_empty_columns(visit_tensor_ls, mask_ls)
 
-    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids, valid_person_info, valid_recent_visits, valid_labels, setup="both")
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids.toPandas(), valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both")
     print("finish pre-processing!!!")
-    # visit_tensor_ls, mask_ls = remove_empty_columns(visit_tensor_ls, mask_ls)
+    visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
 
     data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
 
@@ -4367,35 +4478,59 @@ def train_sequential_model_2(train_valid_split, Long_COVID_Silver_Standard, pers
 
     # Construct dataloaders
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
-    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=32, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=32, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
 
-    epochs=30
+    epochs=1
     print(train_dataset.__getitem__(1)[0])
     dim = train_dataset.__getitem__(1)[0].shape[-1]
+    static_input_dim = train_dataset.__getitem__(1)[3].shape[-1]
     print("data shape::", train_dataset.__getitem__(1)[0].shape)
     print("mask shape::", train_dataset.__getitem__(1)[1].shape)
     print("dim::", dim)
     print(data_min)
     latent_dim=20
-    rec_hidden=64
+    rec_hidden=32
     learn_emb=True
     enc_num_heads=1
     num_ref_points=128
     gen_hidden=30
     dec_num_heads=1
-    classifier = create_classifier(latent_dim, 20)
+    classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
     device = torch.device(
         'cuda' if torch.cuda.is_available() else 'cpu')
     print("device::", device)
-    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=128, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
-    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=128, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
-    lr = 0.001
+    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    lr = 0.0005
 
     rec = rec.to(device)
     dec = dec.to(device)
     classifier = classifier.to(device)
 
+    best_valid_true, best_valid_pred_labels, best_train_true, best_train_pred_labels = train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
+    print("train true::", best_train_true)
+    print("train pred labels::",best_train_pred_labels)
+    incorrect_labeled_train_ids = torch.from_numpy(np.nonzero(best_train_true.reshape(-1) != best_train_pred_labels.reshape(-1))[0])
+    incorrect_sample_weight=3
+    train_set_weight = torch.ones(len(train_dataset))
+    train_set_weight[incorrect_labeled_train_ids] = incorrect_sample_weight
+    train_set_weight = train_set_weight/incorrect_sample_weight
+    sampler = torch.utils.data.WeightedRandomSampler(train_set_weight, len(train_set_weight))
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, sampler=sampler, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    print("start reweighted training::")
+
+    classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    rec = rec.to(device)
+    dec = dec.to(device)
+    classifier = classifier.to(device)
     train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
+
+    # #computing shapley values
+    # data_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=1, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    # evaluate_shapley_value(data_loader, rec, dec, classifier, latent_dim, 1, dim, device)
+
     # # Construct the two datasets
     # train_dataset = LongCOVIDVisitsDataset(train_person_ids, train_person_info, train_recent_visits, train_labels)
     # valid_dataset = LongCOVIDVisitsDataset(valid_person_ids, valid_person_info, valid_recent_visits, valid_labels)
@@ -4473,34 +4608,52 @@ def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, pers
 
     # Construct dataloaders
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
-    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=32, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=32, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
 
-    epochs=30
+    epochs=50
     print(train_dataset.__getitem__(1)[0])
     dim = train_dataset.__getitem__(1)[0].shape[-1]
+    static_input_dim = train_dataset.__getitem__(1)[3].shape[-1]
     print("data shape::", train_dataset.__getitem__(1)[0].shape)
     print("mask shape::", train_dataset.__getitem__(1)[1].shape)
     print("dim::", dim)
     print(data_min)
     latent_dim=20
-    rec_hidden=64
+    rec_hidden=32
     learn_emb=True
     enc_num_heads=1
     num_ref_points=128
     gen_hidden=30
     dec_num_heads=1
-    classifier = create_classifier(latent_dim, 20)
+    classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
     device = torch.device(
         'cuda' if torch.cuda.is_available() else 'cpu')
     print("device::", device)
-    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=128, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
-    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=128, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
-    lr = 0.0002
+    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    lr = 0.0005
 
     rec = rec.to(device)
     dec = dec.to(device)
     classifier = classifier.to(device)
 
+    best_valid_true, best_valid_pred_labels, best_train_true, best_train_pred_labels = train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
+
+    incorrect_labeled_train_ids = torch.from_numpy(np.nonzero(best_train_true != best_train_pred_labels).reshape(-1))
+    incorrect_sample_weight=3
+    train_set_weight = torch.ones(len(train_dataset))
+    train_set_weight[incorrect_labeled_train_ids] = incorrect_sample_weight
+    train_set_weight = train_set_weight/incorrect_sample_weight
+    sampler = WeightedRandomSampler(train_set_weight, len(train_set_weight))
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, sampler=sampler, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    print("start reweighted training::")
+
+    classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    rec = rec.to(device)
+    dec = dec.to(device)
+    classifier = classifier.to(device)
     train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
     # # Construct the two datasets
     # train_dataset = LongCOVIDVisitsDataset(train_person_ids, train_person_info, train_recent_visits, train_labels)
@@ -4600,6 +4753,408 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     predictions['ens_outcome'] = predictions.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
 
     return predictions
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.d7140ada-9148-4d0a-956c-adab7b0af033"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
+    all_patients_summary_fact_table_de_id_testing=Input(rid="ri.foundry.main.dataset.4b4d2bc0-b43f-4d63-abc6-ed115f0cd117"),
+    person_information=Input(rid="ri.foundry.main.dataset.2f6ebf73-3a2d-43dc-ace9-da56da4b1743"),
+    recent_visits_w_nlp_notes_2=Input(rid="ri.foundry.main.dataset.fc6afa83-8c7a-4b04-a92a-ff1162651b0b"),
+    train_valid_split=Input(rid="ri.foundry.main.dataset.9d1a79f6-7627-4ee4-abc0-d6d6179c2f26")
+)
+def train_test_model_with_sequence_model(all_patients_summary_fact_table_de_id, all_patients_summary_fact_table_de_id_testing, Long_COVID_Silver_Standard, person_information, train_valid_split, recent_visits_w_nlp_notes_2):
+    
+    def prepare_sequence_data():
+        train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+        valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+
+        train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+        valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+        train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+        valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+        # print(train_recent_visits.show())
+
+        train_person_info = train_person_ids.join(person_information, on="person_id")
+        valid_person_info = valid_person_ids.join(person_information, on="person_id")
+        return train_person_ids, valid_person_ids, train_recent_visits, valid_recent_visits, train_person_info, valid_person_info, train_labels, valid_labels
+
+    def prepare_static_data(train_person_ids, valid_person_ids, Long_COVID_Silver_Standard):
+        
+        train_person_ids = train_person_ids.toPandas()
+        valid_person_ids = valid_person_ids.toPandas()
+        Long_COVID_Silver_Standard = Long_COVID_Silver_Standard.toPandas()
+
+        static_cols = ['person_id','total_visits', 'age']
+
+        cols = static_cols + [col for col in all_patients_summary_fact_table_de_id.columns if 'indicator' in col]
+        
+        ## get outcome column
+        Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
+        Outcome_df = all_patients_summary_fact_table_de_id[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
+        # Outcome_df = all_patients_summary_fact_table_de_id.select(["person_id"]).join(Long_COVID_Silver_Standard, on="person_id", how="left")
+        Outcome_df = Outcome_df[["person_id", "outcome"]].sort_values('person_id')
+
+        Outcome = list(Outcome_df["outcome"])
+
+        Training_and_Holdout = all_patients_summary_fact_table_de_id[cols].fillna(0.0).sort_values('person_id')
+        #Testing = all_patients_summary_fact_table_de_id_testing[cols].fillna(0.0)
+        X_train_no_ind = Training_and_Holdout.merge(train_person_ids, on="person_id")
+        X_test_no_ind = Training_and_Holdout.merge(valid_person_ids, on="person_id")
+        y_train = Outcome_df.merge(train_person_ids, on="person_id")
+        y_test = Outcome_df.merge(valid_person_ids, on="person_id")
+        X_train_no_ind = X_train_no_ind.sort_values("person_id")
+        X_test_no_ind = X_test_no_ind.sort_values("person_id")
+        y_train = y_train.sort_values("person_id")
+        y_test = y_test.sort_values("person_id")
+        print("first 10 train person ids::", list(X_train_no_ind["person_id"])[0:10])
+        print("first 10 train person ids::", list(y_train["person_id"])[0:10])
+        print("first 10 test person ids::", list(X_test_no_ind["person_id"])[0:10])
+        print("first 10 test person ids::", list(y_test["person_id"])[0:10])
+        y_train = y_train.set_index("person_id")
+        y_test = y_test.set_index("person_id")
+        X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+        # X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+        # X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+        
+        X_train = X_train[list(X_train.columns)[0:-1]]
+        person_ids_test = list(X_test.index)
+        X_test = X_test[list(X_test.columns)[0:-1]]
+        print("X_train::", X_train)
+        print("Y_train::", y_train)
+        return np.array(X_train.values.tolist()), np.array(X_test.values.tolist()), np.array(list(y_train["outcome"])), np.array(list(y_test["outcome"])), person_ids_test
+
+    def train_mTan_model_main(train_person_ids, valid_person_ids, train_recent_visits, valid_recent_visits, train_person_info, valid_person_info, train_labels, valid_labels):
+        print("start pre-processing!!!")
+        visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids.toPandas(), train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both")
+        # torch.save(visit_tensor_ls, "train_visit_tensor_ls")
+        # torch.save(mask_ls, "train_mask_ls")
+        # torch.save(time_step_ls, "train_mask_ls")
+        # torch.save(label_tensor_ls, "train_label_tensor_ls")
+        # torch.save(person_info_ls, "train_person_info_ls")
+        
+        # visit_tensor_ls, mask_ls = remove_empty_columns(visit_tensor_ls, mask_ls)
+
+        valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids.toPandas(), valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both")
+        print("finish pre-processing!!!")
+        visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+        valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+        data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+
+        train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+        valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+        # train_dataset = LongCOVIDVisitsDataset2(train_person_ids, train_person_info, train_recent_visits, train_labels)
+        # valid_dataset = LongCOVIDVisitsDataset2(valid_person_ids, valid_person_info, valid_recent_visits, valid_labels)
+
+        # Construct dataloaders
+        train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+        valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=32, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+
+        epochs=30
+        print(train_dataset.__getitem__(1)[0])
+        dim = train_dataset.__getitem__(1)[0].shape[-1]
+        print("data shape::", train_dataset.__getitem__(1)[0].shape)
+        print("mask shape::", train_dataset.__getitem__(1)[1].shape)
+        print("dim::", dim)
+        print(data_min)
+        latent_dim=20
+        rec_hidden=64
+        learn_emb=True
+        enc_num_heads=1
+        num_ref_points=128
+        gen_hidden=30
+        dec_num_heads=1
+        static_input_dim = train_dataset.__getitem__(1)[3].shape[-1]
+        classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+        device = torch.device(
+            'cuda' if torch.cuda.is_available() else 'cpu')
+        print("device::", device)
+        rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=128, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+        dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=128, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+        lr = 0.0002
+
+        rec = rec.to(device)
+        dec = dec.to(device)
+        classifier = classifier.to(device)
+
+        return train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
+
+    train_person_ids, valid_person_ids, train_recent_visits, valid_recent_visits, train_person_info, valid_person_info, train_labels, valid_labels = prepare_sequence_data()
+    X_train, X_test, y_train, y_test, person_ids_test = prepare_static_data(train_person_ids, valid_person_ids, Long_COVID_Silver_Standard)
+
+    Y_true, Y_mTans, _, _ = train_mTan_model_main(train_person_ids, valid_person_ids, train_recent_visits, valid_recent_visits, train_person_info, valid_person_info, train_labels, valid_labels)
+
+    def train_simple_models(X_train,y_train, X_test, y_test):
+        print(X_train)
+        lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
+        lrc2 = LogisticRegression(penalty='l2', class_weight='balanced', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
+        rfc = RandomForestClassifier().fit(X_train, y_train)
+        gbc = GradientBoostingClassifier().fit(X_train, y_train)
+
+        # lrc_sort_features = np.argsort(lrc.coef_.flatten())[-20:]
+        # lrc_sort_features_least = np.argsort(lrc.coef_.flatten())[:20]
+        # rfc_sort_features = np.argsort(rfc.feature_importances_.flatten())[-20:]
+        # rfc_sort_features_least = np.argsort(rfc.feature_importances_.flatten())[:20]
+        # plt.bar(np.arange(20), rfc.feature_importances_.flatten()[rfc_sort_features])
+        # plt.xticks(np.arange(20), [cols[1:][i] for i in rfc_sort_features], rotation='vertical')
+        # plt.tight_layout()
+        # plt.show()
+
+        # print("lrc important features:", [cols[1:][int(i)] for i in lrc_sort_features])
+        # print("rfc important features:", [cols[1:][int(i)] for i in rfc_sort_features])
+        # print("lrc least important features:", [cols[1:][int(i)] for i in lrc_sort_features_least ])
+        # print("rfc least important features:", [cols[1:][int(i)] for i in rfc_sort_features_least ])
+        # print("combined least important features:", [cols[1:][int(i)] for i in rfc_sort_features_least if i in lrc_sort_features_least])
+        # print("column variance: \n", all_patients_summary_fact_table_de_id.var().to_string())
+        nn_scaler = StandardScaler().fit(X_train)
+        nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
+
+        #preds = clf.predict_proba(Testing)[:,1]
+
+        lr_test_preds = lrc.predict_proba(X_test)[:, 1]
+        lr_train_preds = lrc.predict_proba(X_train)[:, 1]
+        lr2_test_preds = lrc2.predict_proba(X_test)[:, 1]
+        rf_test_preds = rfc.predict_proba(X_test)[:, 1]
+        rf_train_preds = rfc.predict_proba(X_train)[:, 1]
+        gb_test_preds = gbc.predict_proba(X_test)[:, 1]
+        nnc_test_preds = nnc.predict_proba(nn_scaler.transform(X_test))[:, 1]
+
+        print("LR Training Classification Report:\n{}".format(classification_report(y_train, np.where(lr_train_preds > 0.5, 1, 0))))
+
+        #test_df = 
+        test_predictions = pd.DataFrame.from_dict({
+            'person_id': person_ids_test,
+            'lr_outcome': lr_test_preds.tolist(),
+            'lr2_outcome': lr2_test_preds.tolist(),
+            'rf_outcome': rf_test_preds.tolist(),
+            'gb_outcome': gb_test_preds.tolist(),
+            'nn_outcome': nnc_test_preds.tolist(),
+        }, orient='columns')
+        
+        # test_predictions = test_predictions.merge(Outcome_df, on="person_id", how="left")
+        # outcomes = ['lr_outcome', 'lr2_outcome', 'rf_outcome', 'gb_outcome', 'nn_outcome']
+        # test_predictions['ens_outcome'] = test_predictions.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
+
+    # predictions = pd.DataFrame.from_dict({
+    #     'person_id': list(all_patients_summary_fact_table_de_id_testing["person_id"]),
+    #     'outcome_likelihood': preds.tolist()
+    # }, orient='columns')
+
+        return lr_test_preds.tolist(), lr2_test_preds.tolist(), rf_test_preds.tolist(),gb_test_preds.tolist(), nnc_test_preds.tolist()
+
+    lr_test_preds, lr2_test_preds, rf_test_preds,gb_test_preds, nnc_test_preds = train_simple_models(X_train,y_train, X_test, y_test)
+
+    Y_all = np.stack((gb_test_preds, nnc_test_preds, Y_mTans), axis=0)
+
+    # Y_all = np.stack((lr_test_preds, lr2_test_preds, rf_test_preds, gb_test_preds, nnc_test_preds), axis=0)
+    Y_all = (Y_all > 0.5).astype(int)
+    Y_final_pred = scipy.stats.mode(Y_all, axis=0).mode[0]
+    print("pred labels::", Y_final_pred.reshape(-1))
+    print("gt labels::", y_test.reshape(-1))
+    print("validation classification Report:\n{}".format(classification_report(y_test.reshape(-1).astype(int), Y_final_pred.reshape(-1))))
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.ef9bccf1-8bcb-4ade-a935-23bfb3d41c87"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
+    all_patients_summary_fact_table_de_id_testing=Input(rid="ri.foundry.main.dataset.4b4d2bc0-b43f-4d63-abc6-ed115f0cd117"),
+    person_information=Input(rid="ri.foundry.main.dataset.2f6ebf73-3a2d-43dc-ace9-da56da4b1743"),
+    recent_visits_w_nlp_notes_2=Input(rid="ri.foundry.main.dataset.fc6afa83-8c7a-4b04-a92a-ff1162651b0b"),
+    train_valid_split=Input(rid="ri.foundry.main.dataset.9d1a79f6-7627-4ee4-abc0-d6d6179c2f26")
+)
+def train_test_model_with_sequence_model_2(all_patients_summary_fact_table_de_id, all_patients_summary_fact_table_de_id_testing, Long_COVID_Silver_Standard, person_information, train_valid_split, recent_visits_w_nlp_notes_2):
+    
+    def prepare_sequence_data():
+        train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+        valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+
+        train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+        valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+        train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+        valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+        # print(train_recent_visits.show())
+
+        train_person_info = train_person_ids.join(person_information, on="person_id")
+        valid_person_info = valid_person_ids.join(person_information, on="person_id")
+        return train_person_ids, valid_person_ids, train_recent_visits, valid_recent_visits, train_person_info, valid_person_info, train_labels, valid_labels
+
+    def prepare_static_data(train_person_ids, valid_person_ids, Long_COVID_Silver_Standard):
+        
+        train_person_ids = train_person_ids.toPandas()
+        valid_person_ids = valid_person_ids.toPandas()
+        Long_COVID_Silver_Standard = Long_COVID_Silver_Standard.toPandas()
+
+        static_cols = ['person_id','total_visits', 'age']
+
+        cols = static_cols + [col for col in all_patients_summary_fact_table_de_id.columns if 'indicator' in col]
+        
+        ## get outcome column
+        Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
+        Outcome_df = all_patients_summary_fact_table_de_id[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
+        # Outcome_df = all_patients_summary_fact_table_de_id.select(["person_id"]).join(Long_COVID_Silver_Standard, on="person_id", how="left")
+        Outcome_df = Outcome_df[["person_id", "outcome"]].sort_values('person_id')
+
+        Outcome = list(Outcome_df["outcome"])
+
+        Training_and_Holdout = all_patients_summary_fact_table_de_id[cols].fillna(0.0).sort_values('person_id')
+        #Testing = all_patients_summary_fact_table_de_id_testing[cols].fillna(0.0)
+        X_train_no_ind = Training_and_Holdout.merge(train_person_ids, on="person_id")
+        X_test_no_ind = Training_and_Holdout.merge(valid_person_ids, on="person_id")
+        y_train = Outcome_df.merge(train_person_ids, on="person_id")
+        y_test = Outcome_df.merge(valid_person_ids, on="person_id")
+        X_train_no_ind = X_train_no_ind.sort_values("person_id")
+        X_test_no_ind = X_test_no_ind.sort_values("person_id")
+        y_train = y_train.sort_values("person_id")
+        y_test = y_test.sort_values("person_id")
+        print("first 10 train person ids::", list(X_train_no_ind["person_id"])[0:10])
+        print("first 10 train person ids::", list(y_train["person_id"])[0:10])
+        print("first 10 test person ids::", list(X_test_no_ind["person_id"])[0:10])
+        print("first 10 test person ids::", list(y_test["person_id"])[0:10])
+        y_train = y_train.set_index("person_id")
+        y_test = y_test.set_index("person_id")
+        X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+        # X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+        # X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+        
+        X_train = X_train[list(X_train.columns)[0:-1]]
+        person_ids_test = list(X_test.index)
+        X_test = X_test[list(X_test.columns)[0:-1]]
+        print("X_train::", X_train)
+        print("Y_train::", y_train)
+        return np.array(X_train.values.tolist()), np.array(X_test.values.tolist()), np.array(list(y_train["outcome"])), np.array(list(y_test["outcome"])), person_ids_test
+
+    def train_mTan_model_main(train_person_ids, valid_person_ids, train_recent_visits, valid_recent_visits, train_person_info, valid_person_info, train_labels, valid_labels):
+        print("start pre-processing!!!")
+        visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids.toPandas(), train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both")
+        # torch.save(visit_tensor_ls, "train_visit_tensor_ls")
+        # torch.save(mask_ls, "train_mask_ls")
+        # torch.save(time_step_ls, "train_mask_ls")
+        # torch.save(label_tensor_ls, "train_label_tensor_ls")
+        # torch.save(person_info_ls, "train_person_info_ls")
+        
+        # visit_tensor_ls, mask_ls = remove_empty_columns(visit_tensor_ls, mask_ls)
+
+        valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids.toPandas(), valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both")
+        print("finish pre-processing!!!")
+        visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+        valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+        data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+
+        train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+        valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+        # train_dataset = LongCOVIDVisitsDataset2(train_person_ids, train_person_info, train_recent_visits, train_labels)
+        # valid_dataset = LongCOVIDVisitsDataset2(valid_person_ids, valid_person_info, valid_recent_visits, valid_labels)
+
+        # Construct dataloaders
+        train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+        valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=32, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+
+        epochs=30
+        print(train_dataset.__getitem__(1)[0])
+        dim = train_dataset.__getitem__(1)[0].shape[-1]
+        print("data shape::", train_dataset.__getitem__(1)[0].shape)
+        print("mask shape::", train_dataset.__getitem__(1)[1].shape)
+        print("dim::", dim)
+        print(data_min)
+        latent_dim=20
+        rec_hidden=64
+        learn_emb=True
+        enc_num_heads=1
+        num_ref_points=128
+        gen_hidden=30
+        dec_num_heads=1
+        static_input_dim = train_dataset.__getitem__(1)[3].shape[-1]
+        classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+        device = torch.device(
+            'cuda' if torch.cuda.is_available() else 'cpu')
+        print("device::", device)
+        rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=128, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+        dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=128, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+        lr = 0.0002
+
+        rec = rec.to(device)
+        dec = dec.to(device)
+        classifier = classifier.to(device)
+
+        return train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
+
+    train_person_ids, valid_person_ids, train_recent_visits, valid_recent_visits, train_person_info, valid_person_info, train_labels, valid_labels = prepare_sequence_data()
+    X_train, X_test, y_train, y_test, person_ids_test = prepare_static_data(train_person_ids, valid_person_ids, Long_COVID_Silver_Standard)
+
+    Y_true, Y_mTans, _, _ = train_mTan_model_main(train_person_ids, valid_person_ids, train_recent_visits, valid_recent_visits, train_person_info, valid_person_info, train_labels, valid_labels)
+
+    def train_simple_models(X_train,y_train, X_test, y_test):
+        print(X_train)
+        lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
+        lrc2 = LogisticRegression(penalty='l2', class_weight='balanced', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
+        rfc = RandomForestClassifier().fit(X_train, y_train)
+        gbc = GradientBoostingClassifier().fit(X_train, y_train)
+
+        # lrc_sort_features = np.argsort(lrc.coef_.flatten())[-20:]
+        # lrc_sort_features_least = np.argsort(lrc.coef_.flatten())[:20]
+        # rfc_sort_features = np.argsort(rfc.feature_importances_.flatten())[-20:]
+        # rfc_sort_features_least = np.argsort(rfc.feature_importances_.flatten())[:20]
+        # plt.bar(np.arange(20), rfc.feature_importances_.flatten()[rfc_sort_features])
+        # plt.xticks(np.arange(20), [cols[1:][i] for i in rfc_sort_features], rotation='vertical')
+        # plt.tight_layout()
+        # plt.show()
+
+        # print("lrc important features:", [cols[1:][int(i)] for i in lrc_sort_features])
+        # print("rfc important features:", [cols[1:][int(i)] for i in rfc_sort_features])
+        # print("lrc least important features:", [cols[1:][int(i)] for i in lrc_sort_features_least ])
+        # print("rfc least important features:", [cols[1:][int(i)] for i in rfc_sort_features_least ])
+        # print("combined least important features:", [cols[1:][int(i)] for i in rfc_sort_features_least if i in lrc_sort_features_least])
+        # print("column variance: \n", all_patients_summary_fact_table_de_id.var().to_string())
+        nn_scaler = StandardScaler().fit(X_train)
+        nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
+
+        #preds = clf.predict_proba(Testing)[:,1]
+
+        lr_test_preds = lrc.predict_proba(X_test)[:, 1]
+        lr_train_preds = lrc.predict_proba(X_train)[:, 1]
+        lr2_test_preds = lrc2.predict_proba(X_test)[:, 1]
+        rf_test_preds = rfc.predict_proba(X_test)[:, 1]
+        rf_train_preds = rfc.predict_proba(X_train)[:, 1]
+        gb_test_preds = gbc.predict_proba(X_test)[:, 1]
+        nnc_test_preds = nnc.predict_proba(nn_scaler.transform(X_test))[:, 1]
+
+        print("LR Training Classification Report:\n{}".format(classification_report(y_train, np.where(lr_train_preds > 0.5, 1, 0))))
+
+        #test_df = 
+        test_predictions = pd.DataFrame.from_dict({
+            'person_id': person_ids_test,
+            'lr_outcome': lr_test_preds.tolist(),
+            'lr2_outcome': lr2_test_preds.tolist(),
+            'rf_outcome': rf_test_preds.tolist(),
+            'gb_outcome': gb_test_preds.tolist(),
+            'nn_outcome': nnc_test_preds.tolist(),
+        }, orient='columns')
+        
+        # test_predictions = test_predictions.merge(Outcome_df, on="person_id", how="left")
+        # outcomes = ['lr_outcome', 'lr2_outcome', 'rf_outcome', 'gb_outcome', 'nn_outcome']
+        # test_predictions['ens_outcome'] = test_predictions.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
+
+    # predictions = pd.DataFrame.from_dict({
+    #     'person_id': list(all_patients_summary_fact_table_de_id_testing["person_id"]),
+    #     'outcome_likelihood': preds.tolist()
+    # }, orient='columns')
+
+        return lr_test_preds.tolist(), lr2_test_preds.tolist(), rf_test_preds.tolist(),gb_test_preds.tolist(), nnc_test_preds.tolist()
+
+    lr_test_preds, lr2_test_preds, rf_test_preds,gb_test_preds, nnc_test_preds = train_simple_models(X_train,y_train, X_test, y_test)
+
+    Y_all = np.stack((gb_test_preds, nnc_test_preds, Y_mTans), axis=0)
+
+    # Y_all = np.stack((lr_test_preds, lr2_test_preds, rf_test_preds, gb_test_preds, nnc_test_preds), axis=0)
+    Y_all = (Y_all > 0.5).astype(int)
+    Y_final_pred = scipy.stats.mode(Y_all, axis=0).mode[0]
+    print("pred labels::", Y_final_pred.reshape(-1))
+    print("gt labels::", y_test.reshape(-1))
+    print("validation classification Report:\n{}".format(classification_report(y_test.reshape(-1).astype(int), Y_final_pred.reshape(-1))))
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.9d1a79f6-7627-4ee4-abc0-d6d6179c2f26"),
