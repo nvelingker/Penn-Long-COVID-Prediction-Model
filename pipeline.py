@@ -53,6 +53,8 @@ LABEL_SETUPS = [
     "both", # Take the `or` of both `pasc_code_prior_four_weeks` and `pasc_code_after_four_weeks` as label
 ]
 
+import pickle
+
 class mTan_model(nn.Module):
     def __init__(self, rec, dec, classifier, latent_dim, k_iwae, device):
         super(mTan_model, self).__init__()
@@ -1323,6 +1325,19 @@ def evaluate_shapley_value(data_loader, rec, dec, classifier, latent_dim, k_iwae
 
     print("finish computing shapley values!!")
     return shap_values_ls
+
+def write_to_pickle(data, output_filename):
+    output = Transforms.get_output()
+    output_fs = output.filesystem()
+
+    with output_fs.open(output_filename + '.pickle', 'wb') as f:
+        pickle.dump(data, f)
+
+def read_from_pickle(transform_input, filename):
+    with transform_input.filesystem().open(filename, 'rb') as f:
+        data = pickle.load(f)
+
+    return data
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
@@ -4138,6 +4153,40 @@ def procedure_table_analysis_1(procedure_occurrence, Long_COVID_Silver_Standard)
     return r
 
 @transform_pandas(
+    Output(rid="ri.vector.main.execute.294d8c37-1827-4f3a-b49c-813e02f68d2c"),
+    train_sequential_model_3=Input(rid="ri.foundry.main.dataset.4fa4a34a-a9e7-489f-a499-023c2d4c44ac")
+)
+import pandas as pd
+
+def read_model_from_pickle_and_predict(train_sequential_model_3):
+
+    # Read fitted model from pickle object
+    dim=10
+    latent_dim=20
+    rec_hidden=32
+    learn_emb=True
+    enc_num_heads=1
+    num_ref_points=128
+    gen_hidden=30
+    dec_num_heads=1
+    static_input_dim = 10
+    classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    device = torch.device(
+        'cuda' if torch.cuda.is_available() else 'cpu')
+    print("device::", device)
+    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+
+    rec.load_state_dict(read_from_pickle(train_sequential_model_3, 'mTans_rec.pickle'))
+    dec.load_state_dict(read_from_pickle(train_sequential_model_3, 'mTans_dec.pickle'))
+    classifier.load_state_dict(read_from_pickle(train_sequential_model_3, "mTans_classifier.pickle"))
+    print("load data successfully")
+    # Make predictions on test data
+    # df = testing_data[['median_income', 'housing_median_age', 'total_rooms']]
+    # predictions = my_model.predict(df)
+    # df['predicted_house_values'] = pd.DataFrame(predictions)    
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.d42a9b47-a06f-4d43-b113-7414a1bdb9b6"),
     all_patients_visit_day_facts_table_de_id=Input(rid="ri.foundry.main.dataset.ace57213-685a-4f18-a157-2b02b41086be")
 )
@@ -4557,6 +4606,27 @@ def train_sequential_model_2(train_valid_split, Long_COVID_Silver_Standard, pers
 )
 def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
     print("start")
+    # dim=10
+    # latent_dim=20
+    # rec_hidden=32
+    # learn_emb=True
+    # enc_num_heads=1
+    # num_ref_points=128
+    # gen_hidden=30
+    # dec_num_heads=1
+    # static_input_dim = 10
+    # classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    # device = torch.device(
+    #     'cuda' if torch.cuda.is_available() else 'cpu')
+    # print("device::", device)
+    # rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    # dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    # lr = 0.0005
+
+    # write_to_pickle(rec.state_dict(), "mTans_rec")
+    # write_to_pickle(dec.state_dict(), "mTans_dec")
+    # write_to_pickle(classifier.state_dict(), "mTans_classifier")
+
     # First get the splitted person ids
     train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
     valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
@@ -4633,28 +4703,45 @@ def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, pers
     dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
     lr = 0.0005
 
+    
+
     rec = rec.to(device)
     dec = dec.to(device)
     classifier = classifier.to(device)
 
     best_valid_true, best_valid_pred_labels, best_train_true, best_train_pred_labels = train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
+    device = torch.device('cpu')
+    write_to_pickle(rec.to(device).state_dict(), "mTans_rec")
+    write_to_pickle(dec.to(device).state_dict(), "mTans_dec")
+    write_to_pickle(classifier.to(device).state_dict(), "mTans_classifier")
+    # read_from_pickle()
+    print("save models successfully")
+    # incorrect_labeled_train_ids = torch.from_numpy(np.nonzero(best_train_true != best_train_pred_labels).reshape(-1))
+    # incorrect_sample_weight=3
+    # train_set_weight = torch.ones(len(train_dataset))
+    # train_set_weight[incorrect_labeled_train_ids] = incorrect_sample_weight
+    # train_set_weight = train_set_weight/incorrect_sample_weight
+    # sampler = WeightedRandomSampler(train_set_weight, len(train_set_weight))
+    # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, sampler=sampler, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    # print("start reweighted training::")
 
-    incorrect_labeled_train_ids = torch.from_numpy(np.nonzero(best_train_true != best_train_pred_labels).reshape(-1))
-    incorrect_sample_weight=3
-    train_set_weight = torch.ones(len(train_dataset))
-    train_set_weight[incorrect_labeled_train_ids] = incorrect_sample_weight
-    train_set_weight = train_set_weight/incorrect_sample_weight
-    sampler = WeightedRandomSampler(train_set_weight, len(train_set_weight))
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, sampler=sampler, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
-    print("start reweighted training::")
+    # classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    # rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    # dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    # rec = rec.to(device)
+    # dec = dec.to(device)
+    # classifier = classifier.to(device)
+    # train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
 
-    classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
-    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
-    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
-    rec = rec.to(device)
-    dec = dec.to(device)
-    classifier = classifier.to(device)
-    train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
+    # device = torch.device('cpu')
+
+    # write_to_pickle(rec.to(device), "mTans_rec")
+    # write_to_pickle(dec.to(device), "mTans_dec")
+    # write_to_pickle(classifier.to(device), "mTans_classifier")
+    # # read_from_pickle()
+    # print("save models successfully")
+
+    
     # # Construct the two datasets
     # train_dataset = LongCOVIDVisitsDataset(train_person_ids, train_person_info, train_recent_visits, train_labels)
     # valid_dataset = LongCOVIDVisitsDataset(valid_person_ids, valid_person_info, valid_recent_visits, valid_labels)
@@ -5075,6 +5162,12 @@ def train_test_model_with_sequence_model_2(all_patients_summary_fact_table_de_id
         rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=128, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
         dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=128, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
         lr = 0.0002
+
+        write_to_pickle(rec, "mTans_rec")
+        write_to_pickle(dec, "mTans_dec")
+        write_to_pickle(classifier, "mTans_classifier")
+        # read_from_pickle()
+        print("save models successfully")
 
         rec = rec.to(device)
         dec = dec.to(device)
