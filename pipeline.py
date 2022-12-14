@@ -4677,10 +4677,10 @@ def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, pers
     # valid_dataset = LongCOVIDVisitsDataset2(valid_person_ids, valid_person_info, valid_recent_visits, valid_labels)
 
     # Construct dataloaders
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
-    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=32, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=4, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
 
-    epochs=50
+    epochs=10
     print(train_dataset.__getitem__(1)[0])
     dim = train_dataset.__getitem__(1)[0].shape[-1]
     static_input_dim = train_dataset.__getitem__(1)[3].shape[-1]
