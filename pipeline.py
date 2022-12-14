@@ -1049,7 +1049,7 @@ def train_mTans(lr, norm, std, alpha, k_iwae, dim, latent_dim, rec, dec, classif
             best_true, best_pred_labels = true.copy(), pred_labels.copy()
             best_train_true, best_train_pred_labels = train_true.copy(), train_pred_labels.copy()
 
-    return best_true, best_pred_labels, best_train_true, best_train_pred_labels
+    return best_true, best_pred_labels, best_train_true, best_train_pred_labels, rec_state_dict, dec_state_dict, classifier_state_dict
         # test_loss, test_acc, test_auc = evaluate_classifier(
         #     rec, test_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim)
 
@@ -4709,11 +4709,11 @@ def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, pers
     dec = dec.to(device)
     classifier = classifier.to(device)
 
-    best_valid_true, best_valid_pred_labels, best_train_true, best_train_pred_labels = train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
+    best_valid_true, best_valid_pred_labels, best_train_true, best_train_pred_labels, rec_state_dict, dec_state_dict, classifier_state_dict = train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
     device = torch.device('cpu')
-    write_to_pickle(rec.to(device).state_dict(), "mTans_rec")
-    write_to_pickle(dec.to(device).state_dict(), "mTans_dec")
-    write_to_pickle(classifier.to(device).state_dict(), "mTans_classifier")
+    write_to_pickle(rec_state_dict, "mTans_rec")
+    write_to_pickle(dec_state_dict, "mTans_dec")
+    write_to_pickle(classifier_state_dict, "mTans_classifier")
     # read_from_pickle()
     print("save models successfully")
     # incorrect_labeled_train_ids = torch.from_numpy(np.nonzero(best_train_true != best_train_pred_labels).reshape(-1))
