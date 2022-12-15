@@ -4843,7 +4843,7 @@ def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, pers
     # return train_person_ids
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.294d8c37-1827-4f3a-b49c-813e02f68d2c"),
+    Output(rid="ri.foundry.main.dataset.c1baf738-71b8-4ffd-8acd-47f6d38af10f"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
     person_information=Input(rid="ri.foundry.main.dataset.2f6ebf73-3a2d-43dc-ace9-da56da4b1743"),
     recent_visits_w_nlp_notes_2=Input(rid="ri.foundry.main.dataset.fc6afa83-8c7a-4b04-a92a-ff1162651b0b"),
