@@ -42,6 +42,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import math
+import shap
 
 import scipy.stats
 
@@ -636,24 +637,24 @@ class LongCOVIDVisitsDataset2(torch.utils.data.Dataset):
         # batched_label_tensor = torch.stack([item[1] for item in data])
         return batched_data_tensor, batched_label_tensor, batched_person_info
 
-    @staticmethod
-    def collate_fn2(data):
-        time_step_ls = [item[2] for item in data]
-        visit_tensor_ls = [item[0] for item in data]
-        mask_ls = [item[1] for item in data]
-        label_tensor_ls = [item[4] for item in data]
-        person_info_ls = [item[3].view(-1) for item in data]
-        data_min = [item[5] for item in data][0]
-        data_max = [item[6] for item in data][0]
-        idx_ls = [item[7] for item in data]
-        batched_data_tensor, batched_label_tensor = variable_time_collate_fn(time_step_ls, visit_tensor_ls, mask_ls, label_tensor_ls, device=torch.device("cpu"), data_min=data_min, data_max=data_max)
-        # batched_person_=[]
-        batched_person_info = torch.stack(person_info_ls)
-        idx_ls_tensor = torch.tensor(idx_ls)
-        print("selected_ids::",idx_ls_tensor)
-        # batched_data_tensor = torch.stack([item[0] for item in data])
-        # batched_label_tensor = torch.stack([item[1] for item in data])
-        return batched_data_tensor, batched_label_tensor, batched_person_info
+    # @staticmethod
+    # def collate_fn2(data):
+    #     time_step_ls = [item[2] for item in data]
+    #     visit_tensor_ls = [item[0] for item in data]
+    #     mask_ls = [item[1] for item in data]
+    #     label_tensor_ls = [item[4] for item in data]
+    #     person_info_ls = [item[3].view(-1) for item in data]
+    #     data_min = [item[5] for item in data][0]
+    #     data_max = [item[6] for item in data][0]
+    #     idx_ls = [item[7] for item in data]
+    #     batched_data_tensor, batched_label_tensor = variable_time_collate_fn(time_step_ls, visit_tensor_ls, mask_ls, label_tensor_ls, device=torch.device("cpu"), data_min=data_min, data_max=data_max)
+    #     # batched_person_=[]
+    #     batched_person_info = torch.stack(person_info_ls)
+    #     idx_ls_tensor = torch.tensor(idx_ls)
+    #     print("selected_ids::",idx_ls_tensor)
+    #     # batched_data_tensor = torch.stack([item[0] for item in data])
+    #     # batched_label_tensor = torch.stack([item[1] for item in data])
+    #     return batched_data_tensor, batched_label_tensor, batched_person_info
 
     # @staticmethod
     # def collate_fn(data):
@@ -1325,9 +1326,57 @@ def test_plstm(model, device, test_loader, dim):
         100. * correct / total))
     return correct / total
 
+def transform_and_draw_figures_for_shapley_values(image_idx, observed_data, observed_mask, observed_tp, shap_values1, shap_values_ls, shap_feature_value_ls):
+    
+
+    shap_value_label_mappings = {}
+
+    shap_feat_value_label_mappings = {}
+
+    for label in range(2):
+
+        
+
+        observed_data_feature_shapley_value = np.sum(shap_values1[label][0], axis = 1)
+
+        observed_mask_feature_shapley_value = np.sum(shap_values1[label][1], axis = 1)
+
+        observed_tp_feature_shapley_value = np.sum(shap_values1[label][2], axis = 1)
+
+        shap_value_label_mappings[label] = shap_values1[label]
+
+        shap_feat_value_label_mappings[label] = [observed_data_feature_shapley_value, observed_mask_feature_shapley_value, observed_tp_feature_shapley_value, shap_values1[label][3]]
+
+        feature_names = ["feature " + str(k) + " at time " + str(r) for r in range(observed_data.shape[1]) for k in range(observed_data.shape[2])]
+        
+        fig_handle = plt.figure(4*image_idx + 2*label)
+        print("start drawing figures")
+        shap.summary_plot(shap_values1[label][0].reshape(1,-1), observed_data.reshape(1,-1), feature_names=feature_names)
+        print("end drawing figures")
+        plt.show()
+        # write_to_pickle(fig_handle, "label_" + str(label) + "_image_" + str(image_idx) + "_data")
+
+        print("end saving figures")
+
+        fig_handle = plt.figure(4*image_idx + 2*label + 1)
+
+        feature_names = ["feature " + str(k) for k in range(observed_data.shape[2])]
+
+        shap.summary_plot(observed_data_feature_shapley_value.reshape(1,-1), torch.sum(observed_data, dim=1).reshape(1,-1), feature_names=feature_names)
+
+        plt.show()
+        # write_to_pickle(fig_handle, "label_" + str(label) + "_feat_image_" + str(image_idx) + "_data")
+
+    shap_values_ls.append(shap_value_label_mappings)
+
+    shap_feature_value_ls.append(shap_feat_value_label_mappings)
+
 def evaluate_shapley_value(data_loader, rec, dec, classifier, latent_dim, k_iwae, dim, device):
 
     shap_values_ls = []
+
+    image_idx = 0
+    shap_feature_value_ls = []
 
     for item in data_loader:
 
@@ -1336,20 +1385,35 @@ def evaluate_shapley_value(data_loader, rec, dec, classifier, latent_dim, k_iwae
         train_batch = train_batch.float()
         observed_data, observed_mask, observed_tp = train_batch[:, :, :dim], train_batch[:, :, dim:2*dim], train_batch[:, :, -1]
         observed_data, observed_mask, observed_tp = observed_data.to(device), observed_mask.to(device), observed_tp.to(device)
+        base_observed_data, base_observed_mask, base_observed_tp, base_person_info = torch.zeros_like(observed_data), torch.zeros_like(observed_mask), torch.zeros_like(observed_tp), torch.zeros_like(person_info_batch)
 
         model = mTan_model(rec, dec, classifier, latent_dim, k_iwae, device)
+        
 
-        explainer1 = shap.GradientExplainer(model, [observed_data, observed_mask, observed_tp, person_info_batch])
+        e = shap.DeepExplainer(model, [base_observed_data, base_observed_mask, base_observed_tp, base_person_info])
 
-        # pred_x, pred_y, qz0_mean, qz0_logvar = model((observed_data, observed_mask, observed_tp, person_info_batch))
-        model.train()
-        shap_values1 = explainer1.shap_values([observed_data, observed_mask, observed_tp, person_info_batch])
-        shap_values_ls.append(shap_values1)
-        print("unique shapley value::", shap_values1[0][0].unique())
+        model.classifier.gru_rnn.train()
+        model.rec.gru_rnn.train()
+        
+        shap_values1 = e.shap_values([observed_data, observed_mask, observed_tp, person_info_batch])
+        print("here")
+
+        transform_and_draw_figures_for_shapley_values(image_idx, observed_data, observed_mask, observed_tp, shap_values1, shap_values_ls, shap_feature_value_ls)
+
+        # explainer1 = shap.GradientExplainer(model, [observed_data, observed_mask, observed_tp, person_info_batch])
+
+        # # pred_x, pred_y, qz0_mean, qz0_logvar = model((observed_data, observed_mask, observed_tp, person_info_batch))
+        # model.train()
+        # shap_values1 = explainer1.shap_values([observed_data, observed_mask, observed_tp, person_info_batch])
+        # shap_values_ls.append(shap_values1)
+        # print(person_info_batch)
+        # print("shapley value::", shap_values1[0][-1])
+        # print("unique shapley value::", np.unique(shap_values1[0][0]))
         del model
+        image_idx += 1
 
     print("finish computing shapley values!!")
-    return shap_values_ls
+    return shap_values_ls, shap_feature_value_ls
 
 def write_to_pickle(data, output_filename):
     output = Transforms.get_output()
@@ -1365,10 +1429,16 @@ class CPU_Unpickler(pickle.Unpickler):
         else:
             return super().find_class(module, name)
 
-def read_from_pickle(transform_input, filename):
+def read_model_from_pickle(transform_input, filename):
     with transform_input.filesystem().open(filename, 'rb') as f:
         data = CPU_Unpickler(f).load()
         # data = pickle.load(f, map_location=torch.device('cpu'))
+
+    return data
+
+def read_from_pickle(transform_input, filename):
+    with transform_input.filesystem().open(filename, 'rb') as f:
+        data = pickle.load(f)
 
     return data
 
@@ -2196,63 +2266,29 @@ def drug_table_analysis_1(drug_exposure, Long_COVID_Silver_Standard):
 
 @transform_pandas(
     Output(rid="ri.vector.main.execute.dd25cecd-c113-4e2c-88c2-bca2053539e6"),
-    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
-    person_information=Input(rid="ri.foundry.main.dataset.2f6ebf73-3a2d-43dc-ace9-da56da4b1743"),
-    recent_visits_w_nlp_notes_2=Input(rid="ri.foundry.main.dataset.fc6afa83-8c7a-4b04-a92a-ff1162651b0b"),
-    train_sequential_model_3=Input(rid="ri.foundry.main.dataset.4fa4a34a-a9e7-489f-a499-023c2d4c44ac"),
-    train_valid_split=Input(rid="ri.foundry.main.dataset.9d1a79f6-7627-4ee4-abc0-d6d6179c2f26")
+    produce_dataset=Input(rid="ri.foundry.main.dataset.ae1c108c-1813-47ba-831c-e5a37c599c49"),
+    train_sequential_model_3=Input(rid="ri.foundry.main.dataset.4fa4a34a-a9e7-489f-a499-023c2d4c44ac")
 )
-def evaluate_mTans_shap_vals(train_sequential_model_3, train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
-    print("start")
-
-    # First get the splitted person ids
-    train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
-    valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
-
-    train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
-    valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
-    train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
-    valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
-    # print(train_recent_visits.show())
-
-    train_person_info = train_person_ids.join(person_information, on="person_id")
-    valid_person_info = valid_person_ids.join(person_information, on="person_id")
-
-    print("start pre-processing!!!")
-    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids.toPandas(), train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both")
-
-    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids.toPandas(), valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both")
-    print("finish pre-processing!!!")
-
-    visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
-    valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
-
-    data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+def evaluate_mTans_shap_vals(train_sequential_model_3, produce_dataset):
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max = read_from_pickle(produce_dataset, "train_data.pickle")
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, _,_ = read_from_pickle(produce_dataset, "subset_valid_data.pickle")
 
     train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
 
-    valid_subset_ids = list(range(20))
-
-    subset_valid_visit_tensor_ls = [valid_visit_tensor_ls[idx] for idx in valid_subset_ids]    
-    subset_valid_mask_ls = [valid_mask_ls[idx] for idx in valid_subset_ids]    
-    subset_valid_time_step_ls = [valid_time_step_ls[idx] for idx in valid_subset_ids]    
-    subset_valid_person_info_ls = [valid_person_info_ls[idx] for idx in valid_subset_ids]    
-    subset_valid_label_tensor_ls = [valid_label_tensor_ls[idx] for idx in valid_subset_ids]    
-
-    valid_dataset = LongCOVIDVisitsDataset2(subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max)
+    valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
 
     # Construct dataloaders
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
     valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=1, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
 
     epochs=10
-    print(train_dataset.__getitem__(1)[0])
+    # print(train_dataset.__getitem__(1)[0])
     dim = train_dataset.__getitem__(1)[0].shape[-1]
     static_input_dim = train_dataset.__getitem__(1)[3].shape[-1]
     print("data shape::", train_dataset.__getitem__(1)[0].shape)
     print("mask shape::", train_dataset.__getitem__(1)[1].shape)
     print("dim::", dim)
-    print(data_min)
+    # print(data_min)
     latent_dim=20
     rec_hidden=32
     learn_emb=True
@@ -2274,10 +2310,10 @@ def evaluate_mTans_shap_vals(train_sequential_model_3, train_valid_split, Long_C
     dec = dec.to(device)
     classifier = classifier.to(device)
 
-    rec.load_state_dict(read_from_pickle(train_sequential_model_3, 'mTans_rec.pickle'))
-    dec.load_state_dict(read_from_pickle(train_sequential_model_3, 'mTans_dec.pickle'))
-    classifier.load_state_dict(read_from_pickle(train_sequential_model_3, "mTans_classifier.pickle"))
-
+    rec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_rec.pickle'))
+    dec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_dec.pickle'))
+    classifier.load_state_dict(read_model_from_pickle(train_sequential_model_3, "mTans_classifier.pickle"))
+    print("start evaluating shapley values!")
     evaluate_shapley_value(valid_loader, rec, dec, classifier, latent_dim, 1, dim, device)
 
 @transform_pandas(
@@ -4608,6 +4644,59 @@ def procedure_table_analysis_1(procedure_occurrence, Long_COVID_Silver_Standard)
     return r
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.ae1c108c-1813-47ba-831c-e5a37c599c49"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    person_information=Input(rid="ri.foundry.main.dataset.2f6ebf73-3a2d-43dc-ace9-da56da4b1743"),
+    recent_visits_w_nlp_notes_2=Input(rid="ri.foundry.main.dataset.fc6afa83-8c7a-4b04-a92a-ff1162651b0b"),
+    train_valid_split=Input(rid="ri.foundry.main.dataset.9d1a79f6-7627-4ee4-abc0-d6d6179c2f26")
+)
+def produce_dataset(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
+    print("start")
+
+    write_to_pickle([torch.zeros(10), torch.ones(10)], "sample_data")
+    # First get the splitted person ids
+    train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+
+    train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # print(train_recent_visits.show())
+
+    train_person_info = train_person_ids.join(person_information, on="person_id")
+    valid_person_info = valid_person_ids.join(person_information, on="person_id")
+
+    print("start pre-processing!!!")
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids.toPandas(), train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both")
+
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids.toPandas(), valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both")
+    print("finish pre-processing!!!")
+
+    visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+    data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+
+    train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+    valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+
+    valid_subset_ids = list(range(10))
+
+    subset_valid_visit_tensor_ls = [valid_visit_tensor_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_mask_ls = [valid_mask_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_time_step_ls = [valid_time_step_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_person_info_ls = [valid_person_info_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_label_tensor_ls = [valid_label_tensor_ls[idx] for idx in valid_subset_ids]    
+
+    subset_valid_dataset = LongCOVIDVisitsDataset2(subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max)
+    write_to_pickle([visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max], "train_data")
+    write_to_pickle([valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max], "valid_data")
+    
+    write_to_pickle([subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max], "subset_valid_data")
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.d42a9b47-a06f-4d43-b113-7414a1bdb9b6"),
     all_patients_visit_day_facts_table_de_id=Input(rid="ri.foundry.main.dataset.ace57213-685a-4f18-a157-2b02b41086be")
 )
@@ -5357,31 +5446,212 @@ def train_sequential_model_3_rebalance(train_sequential_model_3, train_valid_spl
     dec = dec.to(device)
     classifier = classifier.to(device)
 
-    rec.load_state_dict(read_from_pickle(train_sequential_model_3, 'mTans_rec.pickle'))
-    dec.load_state_dict(read_from_pickle(train_sequential_model_3, 'mTans_dec.pickle'))
-    classifier.load_state_dict(read_from_pickle(train_sequential_model_3, "mTans_classifier.pickle"))
+    rec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_rec.pickle'))
+    dec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_dec.pickle'))
+    classifier.load_state_dict(read_model_from_pickle(train_sequential_model_3, "mTans_classifier.pickle"))
     print("load model successfully")
     print("start evaluating model::")
 
-    val_loss, val_acc, val_auc, val_recall, val_precision, _,_ = evaluate_classifier(rec, train_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+    # val_loss, val_acc, val_auc, val_recall, val_precision, _,_ = evaluate_classifier(rec, train_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
 
-    print("validation performance at epoch::", 0)
-    print("validation loss::", val_loss)
-    print("validation accuracy::", val_acc)
-    print("validation auc score::", val_auc)
-    print("validation recall::", val_recall)
-    print("validation precision score::", val_precision)
+    # print("validation performance at epoch::", 0)
+    # print("validation loss::", val_loss)
+    # print("validation accuracy::", val_acc)
+    # print("validation auc score::", val_auc)
+    # print("validation recall::", val_recall)
+    # print("validation precision score::", val_precision)
 
-    _, _, _, _, _, best_train_true, best_train_pred_labels = evaluate_classifier(rec, train_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+    # _, _, _, _, _, best_train_true, best_train_pred_labels = evaluate_classifier(rec, train_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
 
     
 
-    incorrect_labeled_train_ids = torch.from_numpy(np.nonzero(best_train_true.reshape(-1) != best_train_pred_labels.reshape(-1))[0])
-    print("incorrect_labeled_train_ids::", incorrect_labeled_train_ids)
-    print("incorrect_labeled_train_ids count::", len(incorrect_labeled_train_ids))
+    # incorrect_labeled_train_ids = torch.from_numpy(np.nonzero(best_train_true.reshape(-1) != best_train_pred_labels.reshape(-1))[0])
+    # print("incorrect_labeled_train_ids::", incorrect_labeled_train_ids)
+    # print("incorrect_labeled_train_ids count::", len(incorrect_labeled_train_ids))
     incorrect_sample_weight=2
+
+    pos_ids = torch.tensor([idx for idx in range(len(train_dataset.label_tensor_ls)) if train_dataset.label_tensor_ls[idx] == 1])
+    neg_ids = torch.tensor([idx for idx in range(len(train_dataset.label_tensor_ls)) if train_dataset.label_tensor_ls[idx] == 0])
+    print("positive training count::", len(pos_ids))
+    print("negative training count::", len(neg_ids))
+
     train_set_weight = torch.ones(len(train_dataset))
-    train_set_weight[incorrect_labeled_train_ids] = incorrect_sample_weight
+    train_set_weight[pos_ids] = incorrect_sample_weight
+    train_set_weight = train_set_weight/incorrect_sample_weight
+    sampler = torch.utils.data.sampler.WeightedRandomSampler(train_set_weight, len(train_set_weight))
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, sampler=sampler, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    print("start reweighted training::")
+
+    # classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    # device = torch.device(
+    #     'cuda' if torch.cuda.is_available() else 'cpu')
+    # print("device::", device)
+    # rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    # dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+
+    # rec = rec.to(device)
+    # dec = dec.to(device)
+    # classifier = classifier.to(device)
+    best_valid_true, best_valid_pred_labels, best_train_true, best_train_pred_labels, rec_state_dict, dec_state_dict, classifier_state_dict = train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
+    device = torch.device('cpu')
+    write_to_pickle(rec_state_dict, "mTans_rec_reweight")
+    write_to_pickle(dec_state_dict, "mTans_dec_reweight")
+    write_to_pickle(classifier_state_dict, "mTans_classifier_reweight")
+    # read_from_pickle()
+    print("save models successfully")
+    # Make predictions on test data
+    # df = testing_data[['median_income', 'housing_median_age', 'total_rooms']]
+    # predictions = my_model.predict(df)
+    # df['predicted_house_values'] = pd.DataFrame(predictions)    
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.ee71a7b0-2ec3-40e0-b8e2-2106f6feac1f"),
+    produce_dataset=Input(rid="ri.foundry.main.dataset.ae1c108c-1813-47ba-831c-e5a37c599c49"),
+    train_sequential_model_3=Input(rid="ri.foundry.main.dataset.4fa4a34a-a9e7-489f-a499-023c2d4c44ac")
+)
+import pandas as pd
+
+def train_sequential_model_rebalance(train_sequential_model_3, produce_dataset):
+
+    print("start")
+    # dim=10
+    # latent_dim=20
+    # rec_hidden=32
+    # learn_emb=True
+    # enc_num_heads=1
+    # num_ref_points=128
+    # gen_hidden=30
+    # dec_num_heads=1
+    # static_input_dim = 10
+    # classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    # device = torch.device(
+    #     'cuda' if torch.cuda.is_available() else 'cpu')
+    # print("device::", device)
+    # rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    # dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    # lr = 0.0005
+
+    # write_to_pickle(rec.state_dict(), "mTans_rec")
+    # write_to_pickle(dec.state_dict(), "mTans_dec")
+    # write_to_pickle(classifier.state_dict(), "mTans_classifier")
+
+    # First get the splitted person ids
+    # train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    # valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+
+    # train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # # print(train_recent_visits.show())
+
+    # train_person_info = train_person_ids.join(person_information, on="person_id")
+    # valid_person_info = valid_person_ids.join(person_information, on="person_id")
+    # # train_person_ids = train_valid_split.loc[train_valid_split["split"] == "train"]
+    # # valid_person_ids = train_valid_split.loc[train_valid_split["split"] == "valid"]
+
+    # # Use it to split the data into training x/y and validation x/y
+    # # train_recent_visits = train_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
+    # # valid_recent_visits = valid_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
+    # # train_labels = train_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+    # # valid_labels = valid_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+
+    # # Basic person information
+    # # train_person_info = train_person_ids.merge(person_information, on="person_id")
+    # # valid_person_info = valid_person_ids.merge(person_information, on="person_id")
+    
+
+    # print("start pre-processing!!!")
+    # visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids.toPandas(), train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both")
+    # # torch.save(visit_tensor_ls, "train_visit_tensor_ls")
+    # # torch.save(mask_ls, "train_mask_ls")
+    # # torch.save(time_step_ls, "train_mask_ls")
+    # # torch.save(label_tensor_ls, "train_label_tensor_ls")
+    # # torch.save(person_info_ls, "train_person_info_ls")
+    
+    # # visit_tensor_ls, mask_ls = remove_empty_columns(visit_tensor_ls, mask_ls)
+
+    # valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids.toPandas(), valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both")
+    # print("finish pre-processing!!!")
+    # visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    # valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+    # data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max = read_from_pickle(produce_dataset, "train_data.pickle")
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, _,_ = read_from_pickle(produce_dataset, "valid_data.pickle")
+    train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+    valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+
+    # write_to_pickle(train_dataset, "train_dataset")
+    # write_to_pickle(valid_dataset, "valid_dataset")
+    # train_dataset = LongCOVIDVisitsDataset2(train_person_ids, train_person_info, train_recent_visits, train_labels)
+    # valid_dataset = LongCOVIDVisitsDataset2(valid_person_ids, valid_person_info, valid_recent_visits, valid_labels)
+
+    # Construct dataloaders
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=4, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+
+    epochs=10
+    print(train_dataset.__getitem__(1)[0])
+    dim = train_dataset.__getitem__(1)[0].shape[-1]
+    static_input_dim = train_dataset.__getitem__(1)[3].shape[-1]
+    print("data shape::", train_dataset.__getitem__(1)[0].shape)
+    print("mask shape::", train_dataset.__getitem__(1)[1].shape)
+    print("dim::", dim)
+    print(data_min)
+    latent_dim=20
+    rec_hidden=32
+    learn_emb=True
+    enc_num_heads=1
+    num_ref_points=128
+    gen_hidden=30
+    dec_num_heads=1
+    classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    device = torch.device(
+        'cuda' if torch.cuda.is_available() else 'cpu')
+    print("device::", device)
+    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    lr = 0.0005
+
+    
+
+    rec = rec.to(device)
+    dec = dec.to(device)
+    classifier = classifier.to(device)
+
+    rec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_rec.pickle'))
+    dec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_dec.pickle'))
+    classifier.load_state_dict(read_model_from_pickle(train_sequential_model_3, "mTans_classifier.pickle"))
+    print("load model successfully")
+    print("start evaluating model::")
+
+    # val_loss, val_acc, val_auc, val_recall, val_precision, _,_ = evaluate_classifier(rec, train_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+
+    # print("validation performance at epoch::", 0)
+    # print("validation loss::", val_loss)
+    # print("validation accuracy::", val_acc)
+    # print("validation auc score::", val_auc)
+    # print("validation recall::", val_recall)
+    # print("validation precision score::", val_precision)
+
+    # _, _, _, _, _, best_train_true, best_train_pred_labels = evaluate_classifier(rec, train_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+
+    
+
+    # incorrect_labeled_train_ids = torch.from_numpy(np.nonzero(best_train_true.reshape(-1) != best_train_pred_labels.reshape(-1))[0])
+    # print("incorrect_labeled_train_ids::", incorrect_labeled_train_ids)
+    # print("incorrect_labeled_train_ids count::", len(incorrect_labeled_train_ids))
+    incorrect_sample_weight=2
+
+    pos_ids = torch.tensor([idx for idx in range(len(train_dataset.label_tensor_ls)) if train_dataset.label_tensor_ls[idx] == 1])
+    neg_ids = torch.tensor([idx for idx in range(len(train_dataset.label_tensor_ls)) if train_dataset.label_tensor_ls[idx] == 0])
+    print("positive training count::", len(pos_ids))
+    print("negative training count::", len(neg_ids))
+
+    train_set_weight = torch.ones(len(train_dataset))
+    train_set_weight[pos_ids] = incorrect_sample_weight
     train_set_weight = train_set_weight/incorrect_sample_weight
     sampler = torch.utils.data.sampler.WeightedRandomSampler(train_set_weight, len(train_set_weight))
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, sampler=sampler, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
