@@ -24,6 +24,8 @@ import time
 from pyspark.sql import functions as F
 from pyspark.sql.types import IntegerType
 
+import random
+
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import mean_squared_error
@@ -42,7 +44,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import math
-import shap
+# import shap
 
 import scipy.stats
 
@@ -339,38 +341,48 @@ def variable_time_collate_fn(tt_ls, val_ls, mask_ls, labels_ls, device=torch.dev
     # else:
     #     return combined_data
 
-def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setup="both"):
-    all_person_info = all_person_info.set_index("person_id")
+def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setup="both", start_col_id = 5, end_col_id=-1, label_col_name = None):
+    if type(person_ids) is list:
+        all_person_ids = person_ids
+        all_person_ids.sort()
+    else: 
+        all_person_info = all_person_info.set_index("person_id")
+        
+        
+        all_person_ids = list(all_person_info.index.unique())
+        all_person_ids.sort()
     recent_visit = recent_visit.set_index(["person_id", "visit_date"])
     label = label.set_index("person_id")
-    all_person_ids = list(all_person_info.index.unique())
-    all_person_ids.sort()
     print("first 10 person ids::", all_person_ids[0:10])
     # all_person_ids = list(all_person_info.index.unique())
     visit_tensor_ls = []
     mask_ls= []
     time_step_ls=[]
-    person_info_ls = []
+    if all_person_info is None:
+        person_info_ls = None
+    else:
+        person_info_ls = []
     label_tensor_ls = []
     person_count=0
     for person_id in all_person_ids:
-        person_info = all_person_info.loc[person_id]
-        person_info_tensor = torch.tensor([
-            person_info["normalized_age"], 
-            person_info["is_male"], 
-            person_info["is_female"], 
-            person_info["is_other_gender"]
-        ])
+        if all_person_info is not None:
+            person_info = all_person_info.loc[person_id]
+            person_info_tensor = torch.tensor([
+                person_info["normalized_age"], 
+                person_info["is_male"], 
+                person_info["is_female"], 
+                person_info["is_other_gender"]
+            ])
         visits = recent_visit.loc[person_id]
         visit_tensors = []
         time_steps = []
-
-        visits_tensor2 = torch.from_numpy(np.array(visits.iloc[:,5:-1].values.tolist()))
+        # print(visits)
+        visits_tensor2 = torch.from_numpy(np.array(visits.iloc[:,start_col_id:end_col_id].values.tolist()))
         time_steps2 = torch.from_numpy(np.array(visits["diff_days"].values.tolist()))
         for i in range(len(visits)):
             visit = visits.iloc[i]
             # visit_tensor = torch.tensor([visit["diff_date"] / 180] + list(visit[5:]))
-            visit_tensor = list(visit[5:-1])
+            visit_tensor = list(visit[start_col_id:end_col_id])
             time_steps.append(visit["diff_days"])
             visit_tensors.append(torch.tensor(visit_tensor))
         visits_tensor = torch.stack(visit_tensors)
@@ -381,19 +393,24 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
 
         # Obtain the label
         label_row = label.loc[person_id]
-        if setup == "prior":
-            label_tensor = torch.tensor(label_row["pasc_code_prior_four_weeks"])
-        elif setup == "after":
-            label_tensor = torch.tensor(label_row["pasc_code_after_four_weeks"])
-        elif setup == "both":
-            label_tensor = torch.tensor(max(label_row["pasc_code_after_four_weeks"], label_row["pasc_code_prior_four_weeks"]))
+        print("labe row::", label_row)
+        if label_col_name is None:
+            if setup == "prior":
+                label_tensor = torch.tensor(label_row["pasc_code_prior_four_weeks"])
+            elif setup == "after":
+                label_tensor = torch.tensor(label_row["pasc_code_after_four_weeks"])
+            elif setup == "both":
+                label_tensor = torch.tensor(max(label_row["pasc_code_after_four_weeks"], label_row["pasc_code_prior_four_weeks"]))
+            else:
+                raise Exception(f"Unknown setup `{setup}`")
         else:
-            raise Exception(f"Unknown setup `{setup}`")
+            label_tensor = torch.tensor(label_row[label_col_name])
         label_tensor_ls.append(label_tensor)
         visit_tensor_ls.append(visits_tensor)
         mask_ls.append(mask)
         time_step_ls.append(time_steps)
-        person_info_ls.append(person_info_tensor)
+        if person_info_ls is not None:
+            person_info_ls.append(person_info_tensor)
         person_count +=1
         if person_count %10000 == 0:
             print("person count::", person_count)
@@ -607,7 +624,8 @@ class LongCOVIDVisitsDataset2(torch.utils.data.Dataset):
 
         # self.data_tensor, self.label_tensor = variable_time_collate_fn(time_step_ls, visit_tensor_ls, mask_ls, label_tensor_ls, device=torch.device("cpu"), data_min=data_min, data_max=data_max)
         assert len(self.label_tensor_ls) == len(self.person_info_ls)
-        assert len(self.person_info_ls) == len(self.time_step_ls)
+        if self.person_info_ls is not None:
+            assert len(self.person_info_ls) == len(self.time_step_ls)
         assert len(self.visit_tensor_ls) == len(self.label_tensor_ls)
 
     def __len__(self):
@@ -616,7 +634,10 @@ class LongCOVIDVisitsDataset2(torch.utils.data.Dataset):
     
     def __getitem__(self, idx):
         # return self.data_tensor[idx], self.label_tensor[idx]
-        return self.visit_tensor_ls[idx], self.mask_ls[idx], self.time_step_ls[idx], self.person_info_ls[idx], self.label_tensor_ls[idx], self.data_min, self.data_max, idx
+        if self.person_info_ls is not None:
+            return self.visit_tensor_ls[idx], self.mask_ls[idx], self.time_step_ls[idx], self.person_info_ls[idx], self.label_tensor_ls[idx], self.data_min, self.data_max, idx
+        else:
+            return self.visit_tensor_ls[idx], self.mask_ls[idx], self.time_step_ls[idx], None, self.label_tensor_ls[idx], self.data_min, self.data_max, idx
 
     @staticmethod
     def collate_fn(data):
@@ -624,7 +645,10 @@ class LongCOVIDVisitsDataset2(torch.utils.data.Dataset):
         visit_tensor_ls = [item[0] for item in data]
         mask_ls = [item[1] for item in data]
         label_tensor_ls = [item[4] for item in data]
-        person_info_ls = [item[3].view(-1) for item in data]
+        if data[0][3] is not None:
+            person_info_ls = [item[3].view(-1) for item in data]
+        else:
+            person_info_ls = None
         data_min = [item[5] for item in data][0]
         data_max = [item[6] for item in data][0]
         idx_ls = [item[7] for item in data]
@@ -1441,6 +1465,104 @@ def read_from_pickle(transform_input, filename):
         data = pickle.load(f)
 
     return data
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.8a16f982-ef2a-47bf-9cf9-5630e535e8b7"),
+    add_date_diff_cols=Input(rid="ri.foundry.main.dataset.d3dc0e61-b976-406e-917b-a7e47c925333")
+)
+def Produce_obs_dataset(add_date_diff_cols):
+    recent_visits = add_date_diff_cols
+    # def produce_dataset(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
+    print("start")
+    # unique_person_ids = obs_latent_sequence.select("person_id").distinct()
+    
+    unique_person_ids = list(recent_visits.select(F.col('person_id')).distinct().toPandas()['person_id'])
+
+    print("unique person ids::", unique_person_ids[0:10])
+
+    random.shuffle(unique_person_ids)
+
+    print("random unique person ids::", unique_person_ids[0:10])
+
+    train_person_ids = unique_person_ids[0:int(len(unique_person_ids)*0.9)]
+    valid_person_ids = unique_person_ids[int(len(unique_person_ids)*0.9):]
+
+    # spark.createDataFrame(data=dept, schema = deptColumns)
+    # write_to_pickle([torch.zeros(10), torch.ones(10)], "sample_data")
+    # # First get the splitted person ids
+    # train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    # valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+    train_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(train_person_ids))
+    valid_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(valid_person_ids))
+    train_labels = train_recent_visits.select(F.col("person_id"), F.col("outcome"))
+    valid_labels = valid_recent_visits.select(F.col("person_id"), F.col("outcome"))
+    train_recent_visits = train_recent_visits.drop(F.col("outcome"))
+    valid_recent_visits = valid_recent_visits.drop(F.col("outcome"))
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+
+    # train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # print(train_recent_visits.show())
+
+    train_person_info = None#train_person_ids.join(person_information, on="person_id")
+    valid_person_info = None#valid_person_ids.join(person_information, on="person_id")
+
+    print("start pre-processing!!!")
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids, None, train_recent_visits.toPandas(), train_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids, None, valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+    print("finish pre-processing!!!")
+
+    visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+    data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+
+    train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+    valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+
+    valid_subset_ids = list(range(10))
+
+    subset_valid_visit_tensor_ls = [valid_visit_tensor_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_mask_ls = [valid_mask_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_time_step_ls = [valid_time_step_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_person_info_ls = [valid_person_info_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_label_tensor_ls = [valid_label_tensor_ls[idx] for idx in valid_subset_ids]    
+
+    subset_valid_dataset = LongCOVIDVisitsDataset2(subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max)
+    write_to_pickle([visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max], "train_data")
+    write_to_pickle([valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max], "valid_data")
+    
+    write_to_pickle([subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max], "subset_valid_data")
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.d3dc0e61-b976-406e-917b-a7e47c925333"),
+    obs_latent_sequence_2=Input(rid="ri.foundry.main.dataset.9738c306-6d58-457d-8fbe-7d1d5a09ef01")
+)
+from pyspark.sql.functions import col, max as max_, min as min_
+from pyspark.sql.functions import datediff
+from pyspark.sql import SparkSession, Row
+import pyspark.sql.functions as F 
+def add_date_diff_cols(obs_latent_sequence_2):
+    recent_visits = obs_latent_sequence_2
+    min_person_visit_data = recent_visits.groupBy("person_id").agg(min_("visit_date"))
+    print("here")
+
+    # min_person_visit_data = min_person_visit_data.reset_index()
+    min_person_visit_data = min_person_visit_data.withColumnRenamed("min(visit_date)", "min_visit_date")
+    # min_person_visit_data.rename(columns={"min":"min_visit_date"}, inplace="True")
+
+    # recent_visits = recent_visits.merge(min_person_visit_data)
+    recent_visits = recent_visits.join(min_person_visit_data, on = "person_id")
+    
+    # recent_visits["diff_days"] = (recent_visits["visit_date"] - recent_visits["min_visit_date"]).dt.days.astype('int16')
+    recent_visits = recent_visits.withColumn("diff_days", datediff(recent_visits["visit_date"], recent_visits["min_visit_date"]))
+    return recent_visits
+    
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
@@ -4510,6 +4632,158 @@ def obs_latent(observation, condition_occurrence, drug_exposure, procedure_occur
         
     
 
+    
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.99cb0e77-4710-4cc5-b904-57ebc3339cf2"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
+    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
+    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
+    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7"),
+    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
+    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
+)
+def obs_latent_sequence(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure):
+    
+    k = 200
+
+    procedure_occurrence = procedure_occurrence.withColumnRenamed('procedure_date','visit_date')
+    condition_occurrence = condition_occurrence.withColumnRenamed('condition_start_date','visit_date')
+    drug_exposure = drug_exposure.withColumnRenamed('drug_exposure_start_date','visit_date')
+    observation = observation.withColumnRenamed('observation_date','visit_date')
+    measurement = measurement.withColumnRenamed('measurement_date','visit_date')
+    device_exposure = device_exposure.withColumnRenamed('device_exposure_start_date','visit_date')
+    tables = {procedure_occurrence:"procedure_concept_id",condition_occurrence:"condition_concept_id", drug_exposure:"drug_concept_id", observation:"observation_concept_id", measurement:"measurement_concept_id", device_exposure:"device_concept_id"}
+    labels_df = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"])).select(F.col("person_id"), F.col("outcome"))
+
+    feats = Long_COVID_Silver_Standard.select(F.col("person_id"))
+    table_id = 0
+    for TABLE, CONCEPT_ID_COL in tables.items():
+        # print(TABLE.show())
+        TABLE = TABLE.select(F.col("person_id"), F.col("visit_date"), F.col(CONCEPT_ID_COL))             
+        distinct = TABLE.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).limit(k).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
+        df = TABLE.filter(F.col(CONCEPT_ID_COL).isin(distinct))
+        df= df.groupBy('person_id', 'visit_date').pivot(CONCEPT_ID_COL).agg(F.lit(1)).na.fill(0)
+        df = df.select([F.col(c).alias(CONCEPT_ID_COL[:3]+c) if c != "person_id" and c != "visit_date" else c for c in df.columns ])
+
+        print("df columns::", len(df.columns), df.columns)
+        print("feats columns::", len(feats.columns), feats.columns)
+        print("df row count::", df.count())
+        print("feats row count::", feats.count())
+        print("common columns::", list(set(df.columns)&set(feats.columns)))
+        if table_id == 0:
+            feats = feats.join(df, on=list(set(df.columns)&set(feats.columns)), how = "left")
+        else:
+            feats = feats.join(df, on=list(set(df.columns)&set(feats.columns)), how = "outer")
+        table_id += 1
+    # data = feats.na.fill(0).join(labels_df, "person_id")
+    data = feats.join(labels_df, "person_id")
+    print("finish!!")
+    return data
+    
+        
+    
+
+    
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.171b1464-ba7a-41eb-a191-c026ceaa1ed1"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
+    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
+    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
+    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7"),
+    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
+    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
+)
+def obs_latent_sequence_0(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure):
+    
+    k = 200
+
+    procedure_occurrence = procedure_occurrence.withColumnRenamed('procedure_date','visit_date')
+    condition_occurrence = condition_occurrence.withColumnRenamed('condition_start_date','visit_date')
+    drug_exposure = drug_exposure.withColumnRenamed('drug_exposure_start_date','visit_date')
+    observation = observation.withColumnRenamed('observation_date','visit_date')
+    measurement = measurement.withColumnRenamed('measurement_date','visit_date')
+    device_exposure = device_exposure.withColumnRenamed('device_exposure_start_date','visit_date')
+    tables = {procedure_occurrence:"procedure_concept_id",condition_occurrence:"condition_concept_id", drug_exposure:"drug_concept_id", observation:"observation_concept_id", measurement:"measurement_concept_id", device_exposure:"device_concept_id"}
+    labels_df = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"])).select(F.col("person_id"), F.col("outcome"))
+
+    feats = Long_COVID_Silver_Standard.select(F.col("person_id"))
+    table_id = 0
+    for TABLE, CONCEPT_ID_COL in tables.items():
+        # print(TABLE.show())
+        TABLE = TABLE.select(F.col("person_id"), F.col("visit_date"), F.col(CONCEPT_ID_COL))             
+        distinct = TABLE.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).limit(k).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
+        df = TABLE.filter(F.col(CONCEPT_ID_COL).isin(distinct))
+        df= df.groupBy('person_id', 'visit_date').pivot(CONCEPT_ID_COL).agg(F.lit(1)).na.fill(0)
+        df = df.select([F.col(c).alias(CONCEPT_ID_COL[:3]+c) if c != "person_id" and c != "visit_date" else c for c in df.columns ])
+
+        print("df columns::", len(df.columns), df.columns)
+        print("feats columns::", len(feats.columns), feats.columns)
+        print("df row count::", df.count())
+        print("feats row count::", feats.count())
+        print("common columns::", list(set(df.columns)&set(feats.columns)))
+        if table_id == 0:
+            feats = feats.join(df, on=list(set(df.columns)&set(feats.columns)), how = "left")
+        else:
+            feats = feats.join(df, on=list(set(df.columns)&set(feats.columns)), how = "outer")
+        table_id += 1
+    # data = feats.na.fill(0).join(labels_df, "person_id")
+    data = feats.join(labels_df, "person_id")
+    print("finish!!")
+    return data
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.9738c306-6d58-457d-8fbe-7d1d5a09ef01"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
+    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
+    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
+    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7"),
+    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
+    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
+)
+def obs_latent_sequence_2(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure):
+    
+    k = 50
+
+    procedure_occurrence = procedure_occurrence.withColumnRenamed('procedure_date','visit_date')
+    condition_occurrence = condition_occurrence.withColumnRenamed('condition_start_date','visit_date')
+    drug_exposure = drug_exposure.withColumnRenamed('drug_exposure_start_date','visit_date')
+    observation = observation.withColumnRenamed('observation_date','visit_date')
+    measurement = measurement.withColumnRenamed('measurement_date','visit_date')
+    device_exposure = device_exposure.withColumnRenamed('device_exposure_start_date','visit_date')
+    tables = {procedure_occurrence:"procedure_concept_id",condition_occurrence:"condition_concept_id", drug_exposure:"drug_concept_id", observation:"observation_concept_id", measurement:"measurement_concept_id", device_exposure:"device_concept_id"}
+    labels_df = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"])).select(F.col("person_id"), F.col("outcome"))
+
+    feats = Long_COVID_Silver_Standard.select(F.col("person_id"))
+    table_id = 0
+    for TABLE, CONCEPT_ID_COL in tables.items():
+        # print(TABLE.show())
+        TABLE = TABLE.select(F.col("person_id"), F.col("visit_date"), F.col(CONCEPT_ID_COL))             
+        distinct = TABLE.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).limit(k).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
+        df = TABLE.filter(F.col(CONCEPT_ID_COL).isin(distinct))
+        df= df.groupBy('person_id', 'visit_date').pivot(CONCEPT_ID_COL).agg(F.lit(1)).na.fill(0)
+        df = df.select([F.col(c).alias(CONCEPT_ID_COL[:3]+c) if c != "person_id" and c != "visit_date" else c for c in df.columns ])
+        print("df columns::", df.columns)
+        print("feats columns::", feats.columns)
+        print("common columns::", list(set(df.columns)&set(feats.columns)))
+        if table_id == 0:
+            feats = feats.join(df, on=list(set(df.columns)&set(feats.columns)), how = "left")
+        else:
+            feats = feats.join(df, on=list(set(df.columns)&set(feats.columns)), how = "outer")
+        table_id += 1
+    # data = feats.na.fill(0).join(labels_df, "person_id")
+    data = feats.join(labels_df, "person_id")
+    
+    return data
+    
+        
+    
+
+    
     
 
 @transform_pandas(
