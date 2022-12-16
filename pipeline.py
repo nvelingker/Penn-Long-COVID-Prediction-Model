@@ -16,6 +16,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import classification_report
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import RepeatedKFold
 import numpy as np
 from matplotlib import pyplot as plt
 import time
@@ -31,9 +33,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import classification_report,roc_auc_score,recall_score, precision_score, brier_score_loss, average_precision_score, mean_absolute_error
-
+from sklearn.decomposition import PCA
 #load train or test to test copies
-LOAD_TEST = 1
+LOAD_TEST = 0
 #turn merge_label to 0 before submission
 MERGE_LABEL = 1
 import torch
@@ -3998,12 +4000,221 @@ def first_covid_positive_testing(everyone_conditions_of_interest_testing):
     return df
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.fe3d99a6-3290-48a7-b171-579546a399a4"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6")
+)
+def gb_hp_tuning(Long_COVID_Silver_Standard, all_patients_summary_fact_table_de_id):
+    static_cols = ['person_id','total_visits', 'age']
+
+    cols = static_cols + [col for col in all_patients_summary_fact_table_de_id.columns if 'indicator' in col]
+    
+    ## get outcome column
+    Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
+    Outcome_df = all_patients_summary_fact_table_de_id[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
+    Outcome_df = Outcome_df[["person_id", "outcome"]].sort_values('person_id')
+    Outcome = list(Outcome_df["outcome"])
+
+            
+    Training_and_Holdout = all_patients_summary_fact_table_de_id[cols].fillna(0.0).sort_values('person_id')
+    X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+    X, y = Training_and_Holdout.set_index("person_id"), Outcome
+
+    model = GradientBoostingClassifier()
+    # Create the random grid
+    grid = {
+    "loss":["log_loss", "exponential"],
+    "learning_rate": [0.05, 0.075, 0.1, 0.2,.3,.4,.5],
+    "min_samples_split": [0.001,0.01,0.05, 0.5,1],
+    "min_samples_leaf": [0.001,0.005,0.05,0.5,1],
+    "max_depth":[3,5,8,12],
+    "max_features":["log2","sqrt"],
+    "criterion": ["friedman_mse",  "squared_error"],
+    "subsample":[0.5, 0.618, 0.8, 0.9, 0.95, 1.0],
+    "n_estimators":[200],
+    }
+
+    cvFold = RepeatedKFold(n_splits=10, n_repeats=3, random_state=1)
+    randomSearch = RandomizedSearchCV(estimator=model, n_iter=60, n_jobs=-1, cv=cvFold, param_distributions=grid,verbose=2,refit=True, scoring='f1').fit(X,y)
+    params=randomSearch.best_estimator_.get_params()
+    print("All params: \n", params)
+
+    new_model = GradientBoostingClassifier(**params).fit(X_train,y_train)
+
+    test_preds = new_model.predict_proba(X_test)[:, 1]
+    
+    predictions = pd.DataFrame.from_dict({
+        'person_id': X_test_no_ind["person_id"],
+        'pred_outcome': test_preds.tolist(),
+        'outcome': y_test
+    }, orient='columns')
+
+    print("Classification Report:\n{}".format(classification_report(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0))))
+
+    print("MAE:", mean_absolute_error(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("Brier score:", brier_score_loss(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("AP:", average_precision_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("ROC AUC:", roc_auc_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+
+    return predictions
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.71a84ecb-f5da-4847-937b-42a7fb9e1272"),
     location=Input(rid="ri.foundry.main.dataset.4805affe-3a77-4260-8da5-4f9ff77f51ab"),
     location_testing=Input(rid="ri.foundry.main.dataset.06b728e0-0262-4a7a-b9b7-fe91c3f7da34")
 )
 def location_testing_copy(location_testing, location):
     return location_testing if LOAD_TEST == 1 else location
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.dc454421-0a0a-4eb5-b6cc-b452f682a565"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6")
+)
+def lr2_hp_tuning(all_patients_summary_fact_table_de_id, Long_COVID_Silver_Standard):
+
+    static_cols = ['person_id','total_visits', 'age']
+
+    cols = static_cols + [col for col in all_patients_summary_fact_table_de_id.columns if 'indicator' in col]
+    
+    ## get outcome column
+    Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
+    Outcome_df = all_patients_summary_fact_table_de_id[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
+    Outcome_df = Outcome_df[["person_id", "outcome"]].sort_values('person_id')
+    Outcome = list(Outcome_df["outcome"])
+
+            
+    Training_and_Holdout = all_patients_summary_fact_table_de_id[cols].fillna(0.0).sort_values('person_id')
+    X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+    X, y = Training_and_Holdout.set_index("person_id"), Outcome
+
+    model = LogisticRegression()
+    C = [0.001, 0.01, 0.1, 1,10,100, 1000]
+    fit_intercept = [False,True]
+    solver = ['lbfgs', 'liblinear', 'newton-cg', 'newton-cholesky', 'sag', 'saga']
+    class_weight=['balanced']
+    grid = dict(C=C,fit_intercept=fit_intercept,solver=solver,class_weight=class_weight)
+
+    cvFold = RepeatedKFold(n_splits=5, n_repeats=3, random_state=1)
+    randomSearch = RandomizedSearchCV(estimator=model, n_iter=60, n_jobs=-1, cv=cvFold, param_distributions=grid,verbose=2,refit=True, scoring='f1').fit(X,y)
+    params=randomSearch.best_estimator_.get_params()
+    print("All params: \n", params)
+
+    new_model = LogisticRegression(**params).fit(X_train,y_train)
+
+    test_preds = new_model.predict_proba(X_test)[:, 1]
+    
+    predictions = pd.DataFrame.from_dict({
+        'person_id': X_test_no_ind["person_id"],
+        'pred_outcome': test_preds.tolist(),
+        'outcome': y_test
+    }, orient='columns')
+
+    print("Classification Report:\n{}".format(classification_report(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0))))
+
+    print("MAE:", mean_absolute_error(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("Brier score:", brier_score_loss(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("AP:", average_precision_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("ROC AUC:", roc_auc_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+
+    return predictions
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.5f501591-3819-462a-bfad-9ead2eaf6581"),
+    obs_latent=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
+)
+def lr2_hp_tuning_copied(obs_latent):
+    X = obs_latent.drop("outcome", axis=1)
+    y = obs_latent.loc[:,"outcome"]
+
+    X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(X, y, train_size=0.9, random_state=1)
+    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+
+    model = LogisticRegression()
+    C = [0.001, 0.01, 0.1, 1,10,100, 1000]
+    fit_intercept = [False,True]
+    solver = ['lbfgs', 'liblinear', 'newton-cg', 'newton-cholesky', 'sag', 'saga']
+    class_weight=['balanced']
+    grid = dict(C=C,fit_intercept=fit_intercept,solver=solver,class_weight=class_weight)
+
+    cvFold = RepeatedKFold(n_splits=5, n_repeats=3, random_state=1)
+    randomSearch = RandomizedSearchCV(estimator=model, n_iter=60, n_jobs=-1, cv=cvFold, param_distributions=grid,verbose=2,refit=True, scoring='f1').fit(X,y)
+    params=randomSearch.best_estimator_.get_params()
+    print("All params: \n", params)
+
+    new_model = LogisticRegression(**params).fit(X_train,y_train)
+
+    test_preds = new_model.predict_proba(X_test)[:, 1]
+    
+    predictions = pd.DataFrame.from_dict({
+        'person_id': X_test_no_ind["person_id"],
+        'pred_outcome': test_preds.tolist(),
+        'outcome': y_test
+    }, orient='columns')
+
+    print("Classification Report:\n{}".format(classification_report(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0))))
+
+    print("MAE:", mean_absolute_error(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("Brier score:", brier_score_loss(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("AP:", average_precision_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("ROC AUC:", roc_auc_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+
+    return predictions
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.9832b19b-275e-4ac2-bef3-bb57c4287692"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6")
+)
+def lr_hp_tuning(Long_COVID_Silver_Standard, all_patients_summary_fact_table_de_id):
+        
+    static_cols = ['person_id','total_visits', 'age']
+
+    cols = static_cols + [col for col in all_patients_summary_fact_table_de_id.columns if 'indicator' in col]
+    
+    ## get outcome column
+    Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
+    Outcome_df = all_patients_summary_fact_table_de_id[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
+    Outcome_df = Outcome_df[["person_id", "outcome"]].sort_values('person_id')
+    Outcome = list(Outcome_df["outcome"])
+
+            
+    Training_and_Holdout = all_patients_summary_fact_table_de_id[cols].fillna(0.0).sort_values('person_id')
+    X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+    X, y = Training_and_Holdout.set_index("person_id"), Outcome
+
+    model = LogisticRegression()
+    C = [0.001, 0.01, 0.1, 1,10,100, 1000]
+    fit_intercept = [False,True]
+    solver = ['lbfgs', 'liblinear', 'newton-cg', 'newton-cholesky', 'sag', 'saga']
+    grid = dict(C=C,fit_intercept=fit_intercept,solver=solver)
+
+    cvFold = RepeatedKFold(n_splits=5, n_repeats=3, random_state=1)
+    randomSearch = RandomizedSearchCV(estimator=model, n_iter=60, n_jobs=-1, cv=cvFold, param_distributions=grid,verbose=2,refit=True, scoring='f1').fit(X,y)
+    params=randomSearch.best_estimator_.get_params()
+    print("All params: \n", params)
+
+    new_model = LogisticRegression(**params).fit(X_train,y_train)
+
+    test_preds = new_model.predict_proba(X_test)[:, 1]
+    
+    predictions = pd.DataFrame.from_dict({
+        'person_id': X_test_no_ind["person_id"],
+        'pred_outcome': test_preds.tolist(),
+        'outcome': y_test
+    }, orient='columns')
+
+    print("Classification Report:\n{}".format(classification_report(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0))))
+
+    print("MAE:", mean_absolute_error(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("Brier score:", brier_score_loss(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("AP:", average_precision_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("ROC AUC:", roc_auc_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+
+    return predictions
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.f756c161-a369-4a22-9591-03ace0f5d1a5"),
@@ -4124,6 +4335,100 @@ def microvisits_to_macrovisits_testing_copy(microvisits_to_macrovisits_testing, 
     return microvisits_to_macrovisits_testing if LOAD_TEST == 1 else microvisits_to_macrovisits
 
 @transform_pandas(
+    Output(rid="ri.vector.main.execute.72286694-e3b3-4196-b465-79dd27fc01a7"),
+    obs_latent=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
+)
+def model(obs_latent):
+    X = obs_latent.drop("outcome", axis=1)
+    y = obs_latent.loc[:,"outcome"]
+
+    X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(X, y, train_size=0.9, random_state=1)
+    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+    
+
+    lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=0, max_iter=500, class_weight = 'balanced').fit(X_train, y_train)
+    rfc = RandomForestClassifier().fit(X_train, y_train)
+    gbc = GradientBoostingClassifier().fit(X_train, y_train)
+
+    lr_test_preds = lrc.predict_proba(X_test)[:, 1]
+    rf_test_preds = rfc.predict_proba(X_test)[:, 1]
+    gb_test_preds = gbc.predict_proba(X_test)[:, 1]
+
+    df = pd.DataFrame.from_dict({
+        'person_id': list(X_test_no_ind["person_id"]),
+        'lr_outcome': lr_test_preds.tolist(),
+        'rf_outcome': rf_test_preds.tolist(),
+        'gb_outcome': gb_test_preds.tolist(),
+        'outcome': y_test
+    }, orient='columns')
+
+    print("LR Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["lr_outcome"] > 0.5, 1, 0))))
+    print("RF Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["rf_outcome"] > 0.5, 1, 0))))
+    print("GB Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["gb_outcome"] > 0.5, 1, 0))))
+    outcomes = ['lr_outcome', 'rf_outcome', 'gb_outcome']
+    df['ens_outcome'] = df.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
+    print("ENS Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["ens_outcome"] > 0.5, 1, 0))))
+
+    
+    
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.d0963ac3-a28e-4423-bb15-758b9607be79"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6")
+)
+def nn_hp_tuning(Long_COVID_Silver_Standard, all_patients_summary_fact_table_de_id):
+    static_cols = ['person_id','total_visits', 'age']
+
+    cols = static_cols + [col for col in all_patients_summary_fact_table_de_id.columns if 'indicator' in col]
+    
+    ## get outcome column
+    Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
+    Outcome_df = all_patients_summary_fact_table_de_id[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
+    Outcome_df = Outcome_df[["person_id", "outcome"]].sort_values('person_id')
+    Outcome = list(Outcome_df["outcome"])
+
+            
+    Training_and_Holdout = all_patients_summary_fact_table_de_id[cols].fillna(0.0).sort_values('person_id')
+    X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+    X, y = Training_and_Holdout.set_index("person_id"), Outcome
+
+    model = MLPClassifier()
+
+    grid = {
+        'hidden_layer_sizes': [(15,10),(20,5),(15,5), (10,5), (16,3)],
+        'activation': ['relu'],
+        'solver': ['adam'],
+        'alpha': [0.0001, 0.0005, 0.001, 0.05],
+        'learning_rate': ['adaptive'],
+    }
+
+    cvFold = RepeatedKFold(n_splits=10, n_repeats=3, random_state=1)
+    randomSearch = RandomizedSearchCV(estimator=model, n_iter=16, n_jobs=-1, cv=cvFold, param_distributions=grid,verbose=2,refit=True, scoring='f1').fit(X,y)
+    params=randomSearch.best_estimator_.get_params()
+    print("All params: \n", params)
+
+    new_model = MLPClassifier(**params).fit(X_train,y_train)
+
+    test_preds = new_model.predict_proba(X_test)[:, 1]
+    
+    predictions = pd.DataFrame.from_dict({
+        'person_id': X_test_no_ind["person_id"],
+        'pred_outcome': test_preds.tolist(),
+        'outcome': y_test
+    }, orient='columns')
+
+    print("Classification Report:\n{}".format(classification_report(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0))))
+
+    print("MAE:", mean_absolute_error(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("Brier score:", brier_score_loss(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("AP:", average_precision_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("ROC AUC:", roc_auc_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+
+    return predictions
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.d39564f3-817f-4b8a-a8b6-81d4f8fd6bf1"),
     recent_visits_2=Input(rid="ri.foundry.main.dataset.bf18056e-2e27-4f2a-af1a-7b6cabc2a9cf")
 )
@@ -4137,6 +4442,39 @@ def num_recent_visits(recent_visits_2):
         .rename(columns={"visit_date": "num_recent_visits"})
 
     return df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
+    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
+    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
+    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7"),
+    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
+    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
+)
+def obs_latent(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure):
+    tables = {procedure_occurrence:"procedure_concept_id",condition_occurrence:"condition_concept_id", drug_exposure:"drug_concept_id", observation:"observation_concept_id", measurement:"measurement_concept_id", device_exposure:"device_concept_id"}
+    k = 2000
+
+    labels_df = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"])).select(F.col("person_id"), F.col("outcome"))
+
+    feats = Long_COVID_Silver_Standard.select(F.col("person_id"))
+    for TABLE, CONCEPT_ID_COL in tables.items():
+        TABLE = TABLE.select(F.col("person_id"), F.col(CONCEPT_ID_COL))             
+        distinct = TABLE.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).limit(k).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
+        df = TABLE.filter(F.col(CONCEPT_ID_COL).isin(distinct))
+        df= df.groupBy("person_id").pivot(CONCEPT_ID_COL).agg(F.lit(1)).na.fill(0)
+        df = df.select([F.col(c).alias(CONCEPT_ID_COL[:3]+c) if c != "person_id" else c for c in df.columns ])
+        feats = feats.join(df, "person_id", "left")
+    data = feats.na.fill(0).join(labels_df, "person_id")
+    
+    return data
+    
+        
+    
+
+    
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.d049152c-00c4-4584-aa28-c0d4a4177b22"),
@@ -4443,6 +4781,64 @@ def recent_visits_w_nlp_notes_2(recent_visits_2, person_nlp_symptom):
     # df = recent_visits_2.merge(person_nlp_symptom, on=["person_id", "visit_date"], how="left").sort_values(["person_id", "visit_date"])#.fillna(0.0)
 
     return df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.48f1d68a-4344-4b76-ae4e-7fadb12349ea"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6")
+)
+def rf_hp_tuning(Long_COVID_Silver_Standard, all_patients_summary_fact_table_de_id):
+    static_cols = ['person_id','total_visits', 'age']
+
+    cols = static_cols + [col for col in all_patients_summary_fact_table_de_id.columns if 'indicator' in col]
+    
+    ## get outcome column
+    Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
+    Outcome_df = all_patients_summary_fact_table_de_id[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
+    Outcome_df = Outcome_df[["person_id", "outcome"]].sort_values('person_id')
+    Outcome = list(Outcome_df["outcome"])
+
+            
+    Training_and_Holdout = all_patients_summary_fact_table_de_id[cols].fillna(0.0).sort_values('person_id')
+    X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+    X, y = Training_and_Holdout.set_index("person_id"), Outcome
+
+    model = RandomForestClassifier()
+    n_estimators = [100,200,300,400,500,600]
+    bootstrap = [True, False]
+    n_jobs=[-1]
+    class_weight = [None,'balanced','balanced_subsample']
+    # Create the random grid
+    grid = {'n_estimators': n_estimators,
+            'bootstrap': bootstrap,
+            'n_jobs' : n_jobs,
+            'class_weight' : class_weight
+            }
+
+    cvFold = RepeatedKFold(n_splits=5, n_repeats=3, random_state=1)
+    randomSearch = RandomizedSearchCV(estimator=model, n_iter=60, n_jobs=-1, cv=cvFold, param_distributions=grid,verbose=2,refit=True, scoring='f1').fit(X,y)
+    params=randomSearch.best_estimator_.get_params()
+    print("All params: \n", params)
+
+    new_model = RandomForestClassifier(**params).fit(X_train,y_train)
+
+    test_preds = new_model.predict_proba(X_test)[:, 1]
+    
+    predictions = pd.DataFrame.from_dict({
+        'person_id': X_test_no_ind["person_id"],
+        'pred_outcome': test_preds.tolist(),
+        'outcome': y_test
+    }, orient='columns')
+
+    print("Classification Report:\n{}".format(classification_report(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0))))
+
+    print("MAE:", mean_absolute_error(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("Brier score:", brier_score_loss(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("AP:", average_precision_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+    print("ROC AUC:", roc_auc_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
+
+    return predictions
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.235be874-5669-4c42-9ae3-3e6d37b645e1"),
@@ -5046,10 +5442,15 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
         X_test_no_ind, y_test = Testing, None
     X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
 
-    lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
-    lrc2 = LogisticRegression(penalty='l2', class_weight='balanced', solver='liblinear', random_state=0, max_iter=500).fit(X_train, y_train)
-    rfc = RandomForestClassifier().fit(X_train, y_train)
-    gbc = GradientBoostingClassifier().fit(X_train, y_train)
+    lrc_params = {'C': 1, 'class_weight': None, 'dual': False, 'fit_intercept': True, 'intercept_scaling': 1, 'l1_ratio': None, 'max_iter': 100, 'multi_class': 'auto', 'n_jobs': None, 'penalty': 'l2', 'random_state': None, 'solver': 'liblinear', 'tol': 0.0001, 'verbose': 0, 'warm_start': False}
+    lrc2_params = {'C': 1, 'class_weight': 'balanced', 'dual': False, 'fit_intercept': True, 'intercept_scaling': 1, 'l1_ratio': None, 'max_iter': 500, 'multi_class': 'auto', 'n_jobs': None, 'penalty': 'l2', 'random_state': None, 'solver': 'liblinear', 'tol': 0.0001, 'verbose': 0, 'warm_start': False}
+    rfc_params = {'bootstrap': False, 'ccp_alpha': 0.0, 'class_weight': None, 'criterion': 'gini', 'max_depth': None, 'max_features': 'auto', 'max_leaf_nodes': None, 'max_samples': None, 'min_impurity_decrease': 0.0, 'min_impurity_split': None, 'min_samples_leaf': 1, 'min_samples_split': 2, 'min_weight_fraction_leaf': 0.0, 'n_estimators': 400, 'n_jobs': -1, 'oob_score': False, 'random_state': None, 'verbose': 0, 'warm_start': False}
+    gbc_params = {'ccp_alpha': 0.0, 'criterion': 'friedman_mse', 'init': None, 'learning_rate': 0.075, 'loss': 'exponential', 'max_depth': 12, 'max_features': 'log2', 'max_leaf_nodes': None, 'min_impurity_decrease': 0.0, 'min_impurity_split': None, 'min_samples_leaf': 1, 'min_samples_split': 0.001, 'min_weight_fraction_leaf': 0.0, 'n_estimators': 500, 'n_iter_no_change': None, 'random_state': None, 'subsample': 0.618, 'tol': 0.0001, 'validation_fraction': 0.1, 'verbose': 0, 'warm_start': False}
+
+    lrc = LogisticRegression(**lrc_params).fit(X_train, y_train)
+    lrc2 = LogisticRegression(**lrc2_params).fit(X_train, y_train)
+    rfc = RandomForestClassifier(**rfc_params).fit(X_train, y_train)
+    gbc = GradientBoostingClassifier(**gbc_params).fit(X_train, y_train)
 
     lrc_sort_features = np.argsort(lrc.coef_.flatten())[-20:]
     lrc_sort_features_least = np.argsort(lrc.coef_.flatten())[:20]
@@ -5070,7 +5471,7 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
 
     #preds = clf.predict_proba(Testing)[:,1]
-
+    print(X_test.shape)
     lr_test_preds = lrc.predict_proba(X_test)[:, 1]
     lr_train_preds = lrc.predict_proba(X_train)[:, 1]
     lr2_test_preds = lrc2.predict_proba(X_test)[:, 1]
@@ -5090,7 +5491,7 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     
     if MERGE_LABEL  == 1:
         predictions = predictions.merge(Outcome_df, on="person_id", how="left")
-    outcomes = ['lr_outcome', 'lr2_outcome', 'rf_outcome', 'gb_outcome', 'nn_outcome']
+    outcomes = ['lr2_outcome', 'rf_outcome', 'gb_outcome']
     predictions['ens_outcome'] = predictions.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
 
     return predictions
@@ -5530,6 +5931,10 @@ def train_valid_split( Long_COVID_Silver_Standard, num_recent_visits):
 )
 def validation_metrics( train_test_model):
     df = train_test_model
+
+    outcomes = ['lr2_outcome', 'rf_outcome', 'gb_outcome']
+    df['ens_outcome'] = df.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
+    
     print("LR Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["lr_outcome"] > 0.5, 1, 0))))
     print("LR2 Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["lr2_outcome"] > 0.5, 1, 0))))
     print("RF Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["rf_outcome"] > 0.5, 1, 0))))
