@@ -51,6 +51,9 @@ import math
 
 import scipy.stats
 
+from pyspark.sql.functions import datediff
+from pyspark.sql.functions import col, max as max_, min as min_
+
 # Set default dtype
 torch.set_default_dtype(torch.float32)
 
@@ -1556,6 +1559,104 @@ def read_from_pickle(transform_input, filename):
 
     return data
 
+def obtain_latent_sequence(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure, k = 200, start_id=0):
+    
+
+    procedure_occurrence = procedure_occurrence.withColumnRenamed('procedure_date','visit_date')
+    condition_occurrence = condition_occurrence.withColumnRenamed('condition_start_date','visit_date')
+    drug_exposure = drug_exposure.withColumnRenamed('drug_exposure_start_date','visit_date')
+    observation = observation.withColumnRenamed('observation_date','visit_date')
+    measurement = measurement.withColumnRenamed('measurement_date','visit_date')
+    device_exposure = device_exposure.withColumnRenamed('device_exposure_start_date','visit_date')
+    tables = {procedure_occurrence:"procedure_concept_id",condition_occurrence:"condition_concept_id", drug_exposure:"drug_concept_id", observation:"observation_concept_id", measurement:"measurement_concept_id", device_exposure:"device_concept_id"}
+    labels_df = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"])).select(F.col("person_id"), F.col("outcome"))
+
+    feats = Long_COVID_Silver_Standard.select(F.col("person_id"))
+    table_id = 0
+
+    reduced_tables = {}
+
+    union_table = None
+
+    for TABLE, CONCEPT_ID_COL in tables.items():
+        TABLE = TABLE.select(F.col("person_id"), F.col("visit_date"))
+        if union_table is None:
+            union_table = TABLE
+        else:
+            union_table = union_table.union(TABLE)
+
+    # last_visit = all_patients_visit_day_facts_table_de_id \
+    #     .groupby("person_id")["visit_date"] \
+    #     .max() \
+    #     .reset_index("person_id") \
+    #     .rename(columns={"visit_date": "last_visit_date"})
+    
+    # # Add a six-month before the last visit column to the dataframe
+    # last_visit["six_month_before_last_visit"] = last_visit["last_visit_date"].map(lambda x: x - pd.Timedelta(days=180))
+
+    last_visit = union_table \
+        .groupBy("person_id") \
+        .agg(max_("visit_date")).withColumnRenamed("max(visit_date)", "last_visit_date")
+    last_visit = last_visit.withColumn("six_month_before_last_visit", F.date_sub(last_visit["last_visit_date"], 180))
+
+    for TABLE, CONCEPT_ID_COL in tables.items():
+        
+        print("original table size::", TABLE.count())
+
+        df = TABLE.join(last_visit, on = "person_id", how = "left")
+
+        df = df.where(datediff(df["visit_date"], df["six_month_before_last_visit"]) > 0)
+        reduced_tables[df] = CONCEPT_ID_COL
+        print(df)
+        print("reduced table size::", df.count())
+
+    for TABLE, CONCEPT_ID_COL in reduced_tables.items():
+        print(TABLE.show())
+        TABLE = TABLE.select(F.col("person_id"), F.col("visit_date"), F.col(CONCEPT_ID_COL))             
+        # distinct = TABLE.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).limit(k).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
+        distinct = TABLE.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
+        print("top 10 distinct concepts before::", distinct[0:10])
+        distinct = distinct[start_id*k:(start_id + 1)*k]
+        print("top 10 distinct concepts after::", distinct[0:10])
+        df = TABLE.filter(F.col(CONCEPT_ID_COL).isin(distinct))
+        df= df.groupBy('person_id', 'visit_date').pivot(CONCEPT_ID_COL).agg(F.lit(1)).na.fill(0)
+        df = df.select([F.col(c).alias(CONCEPT_ID_COL[:3]+c) if c != "person_id" and c != "visit_date" else c for c in df.columns ])
+
+        print("df columns::", len(df.columns), df.columns)
+        print("feats columns::", len(feats.columns), feats.columns)
+        print("df row count::", df.count())
+        print("feats row count::", feats.count())
+        print("common columns::", list(set(df.columns)&set(feats.columns)))
+        if table_id == 0:
+            feats = feats.join(df, on=list(set(df.columns)&set(feats.columns)), how = "left")
+        else:
+            feats = feats.join(df, on=list(set(df.columns)&set(feats.columns)), how = "outer")
+        table_id += 1
+        print(feats.show())
+        print()
+        print()
+
+    unique_person_ids = list(feats.select(F.col('person_id')).distinct().toPandas()['person_id'])
+
+    print("total person count:", len(unique_person_ids))
+
+    empty_person_ids = list(feats.filter(F.col("visit_date").isNull()).select(F.col("person_id")).distinct().toPandas()['person_id'])
+
+    unique_person_ids = [idx for idx in unique_person_ids if idx not in empty_person_ids]
+
+    print("remaining person count:", len(unique_person_ids))
+
+    feats = feats.filter(feats["person_id"].isin(unique_person_ids))
+
+    # for table in list(tables.keys()):
+        
+
+    
+    # data = feats.na.fill(0).join(labels_df, "person_id")
+    data = feats.join(labels_df, "person_id")
+    print("finish!!")
+    return data
+
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.8a16f982-ef2a-47bf-9cf9-5630e535e8b7"),
     add_date_diff_cols=Input(rid="ri.foundry.main.dataset.d3dc0e61-b976-406e-917b-a7e47c925333")
@@ -1712,13 +1813,22 @@ def Produce_obs_dataset_2(add_date_diff_cols):
     add_date_diff_cols=Input(rid="ri.foundry.main.dataset.d3dc0e61-b976-406e-917b-a7e47c925333"),
     top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
 )
-def Produce_obs_dataset_with_static_feature(add_date_diff_cols, obs_latent):
+def Produce_obs_dataset_with_static_feature(add_date_diff_cols, top_k_concepts_data):
     recent_visits = add_date_diff_cols
     # def produce_dataset(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
     print("start")
     # unique_person_ids = obs_latent_sequence.select("person_id").distinct()
-    
+    obs_latent = top_k_concepts_data
     unique_person_ids = list(recent_visits.select(F.col('person_id')).distinct().toPandas()['person_id'])
+
+    empty_person_ids = list(recent_visits.filter(F.col("visit_date").isNull()).select(F.col("person_id")).distinct().toPandas()['person_id'])
+    print("empty person ids::", unique_person_ids[0:10])
+
+    print("empty person id count::", len(unique_person_ids))
+
+    unique_person_ids = [idx for idx in unique_person_ids if idx not in empty_person_ids]
+
+    print("unique person id count::", len(unique_person_ids))
 
     print("unique person ids::", unique_person_ids[0:10])
 
@@ -1734,6 +1844,365 @@ def Produce_obs_dataset_with_static_feature(add_date_diff_cols, obs_latent):
     # # First get the splitted person ids
     # train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
     # valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+    train_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(train_person_ids))
+    valid_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(valid_person_ids))
+    train_labels = train_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
+    valid_labels = valid_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
+    train_recent_visits = train_recent_visits.drop(F.col("outcome"))
+    valid_recent_visits = valid_recent_visits.drop(F.col("outcome"))
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+
+    # train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # print(train_recent_visits.show())
+
+    train_person_info = obs_latent.filter(obs_latent["person_id"].isin(train_person_ids))
+    valid_person_info = obs_latent.filter(obs_latent["person_id"].isin(valid_person_ids))
+    # train_person_info = train_person_ids.join(person_information, on="person_id")
+    # valid_person_info = valid_person_ids.join(person_information, on="person_id")
+
+    print("start pre-processing!!!")
+    print(train_person_info)
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits2(train_person_ids, train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits2(valid_person_ids, valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+    print("finish pre-processing!!!")
+
+    visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+    data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+
+    train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+    valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+
+    valid_subset_ids = list(range(10))
+
+    subset_valid_visit_tensor_ls = [valid_visit_tensor_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_mask_ls = [valid_mask_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_time_step_ls = [valid_time_step_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_person_info_ls = [valid_person_info_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_label_tensor_ls = [valid_label_tensor_ls[idx] for idx in valid_subset_ids]    
+
+    # subset_valid_dataset = LongCOVIDVisitsDataset2(subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max)
+    write_to_pickle([visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max], "train_data")
+    write_to_pickle([valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max], "valid_data")
+    
+    write_to_pickle([subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max], "subset_valid_data")
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.051f4281-a989-4f89-85d0-d641e2afe2b0"),
+    add_date_diff_cols_2=Input(rid="ri.foundry.main.dataset.1f76df35-5d2f-46f1-8197-d59658d15475"),
+    get_train_valid_partition=Input(rid="ri.foundry.main.dataset.1c438e0a-6066-41ff-b7a7-34352cf60ec5"),
+    top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
+)
+def Produce_obs_dataset_with_static_feature_2(add_date_diff_cols_2, top_k_concepts_data, get_train_valid_partition):
+    recent_visits = add_date_diff_cols_2
+    # def produce_dataset(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
+    print("start")
+    # unique_person_ids = obs_latent_sequence.select("person_id").distinct()
+    obs_latent = top_k_concepts_data
+    # unique_person_ids = list(recent_visits.select(F.col('person_id')).distinct().toPandas()['person_id'])
+
+    # empty_person_ids = list(recent_visits.filter(F.col("visit_date").isNull()).select(F.col("person_id")).distinct().toPandas()['person_id'])
+    # print("empty person ids::", unique_person_ids[0:10])
+
+    # print("empty person id count::", len(unique_person_ids))
+
+    # unique_person_ids = [idx for idx in unique_person_ids if idx not in empty_person_ids]
+
+    # print("unique person id count::", len(unique_person_ids))
+
+    # print("unique person ids::", unique_person_ids[0:10])
+
+    # random.shuffle(unique_person_ids)
+
+    # print("random unique person ids::", unique_person_ids[0:10])
+
+    # train_person_ids = unique_person_ids[0:int(len(unique_person_ids)*0.9)]
+    # valid_person_ids = unique_person_ids[int(len(unique_person_ids)*0.9):]
+    train_person_ids = read_from_pickle(get_train_valid_partition, "train_person_ids.pickle")
+    valid_person_ids = read_from_pickle(get_train_valid_partition, "test_person_ids.pickle")
+
+    # spark.createDataFrame(data=dept, schema = deptColumns)
+    # write_to_pickle([torch.zeros(10), torch.ones(10)], "sample_data")
+    # # First get the splitted person ids
+    # train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    # valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+    train_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(train_person_ids))
+    valid_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(valid_person_ids))
+    train_labels = train_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
+    valid_labels = valid_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
+    train_recent_visits = train_recent_visits.drop(F.col("outcome"))
+    valid_recent_visits = valid_recent_visits.drop(F.col("outcome"))
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+
+    # train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # print(train_recent_visits.show())
+
+    train_person_info = obs_latent.filter(obs_latent["person_id"].isin(train_person_ids))
+    valid_person_info = obs_latent.filter(obs_latent["person_id"].isin(valid_person_ids))
+    # train_person_info = train_person_ids.join(person_information, on="person_id")
+    # valid_person_info = valid_person_ids.join(person_information, on="person_id")
+
+    print("start pre-processing!!!")
+    print(train_person_info)
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits2(train_person_ids, train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits2(valid_person_ids, valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+    print("finish pre-processing!!!")
+
+    visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+    data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+
+    train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+    valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+
+    valid_subset_ids = list(range(10))
+
+    subset_valid_visit_tensor_ls = [valid_visit_tensor_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_mask_ls = [valid_mask_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_time_step_ls = [valid_time_step_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_person_info_ls = [valid_person_info_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_label_tensor_ls = [valid_label_tensor_ls[idx] for idx in valid_subset_ids]    
+
+    # subset_valid_dataset = LongCOVIDVisitsDataset2(subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max)
+    write_to_pickle([visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max], "train_data")
+    write_to_pickle([valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max], "valid_data")
+    
+    write_to_pickle([subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max], "subset_valid_data")
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.17357ea0-3d3e-452d-b4d8-fef5e70d65f4"),
+    add_date_diff_cols_2_200_400=Input(rid="ri.foundry.main.dataset.e6675c90-881b-4eba-957f-072505753517"),
+    get_train_valid_partition=Input(rid="ri.foundry.main.dataset.1c438e0a-6066-41ff-b7a7-34352cf60ec5"),
+    top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
+)
+def Produce_obs_dataset_with_static_feature_2_200_400(top_k_concepts_data, add_date_diff_cols_2_200_400, get_train_valid_partition):
+    recent_visits = add_date_diff_cols_2_200_400
+    # def produce_dataset(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
+    print("start")
+    # unique_person_ids = obs_latent_sequence.select("person_id").distinct()
+    obs_latent = top_k_concepts_data
+    # unique_person_ids = list(recent_visits.select(F.col('person_id')).distinct().toPandas()['person_id'])
+
+    # empty_person_ids = list(recent_visits.filter(F.col("visit_date").isNull()).select(F.col("person_id")).distinct().toPandas()['person_id'])
+    # print("empty person ids::", unique_person_ids[0:10])
+
+    # print("empty person id count::", len(unique_person_ids))
+
+    # unique_person_ids = [idx for idx in unique_person_ids if idx not in empty_person_ids]
+
+    # print("unique person id count::", len(unique_person_ids))
+
+    # print("unique person ids::", unique_person_ids[0:10])
+
+    # random.shuffle(unique_person_ids)
+
+    # print("random unique person ids::", unique_person_ids[0:10])
+
+    # train_person_ids = unique_person_ids[0:int(len(unique_person_ids)*0.9)]
+    # valid_person_ids = unique_person_ids[int(len(unique_person_ids)*0.9):]
+
+    # spark.createDataFrame(data=dept, schema = deptColumns)
+    # write_to_pickle([torch.zeros(10), torch.ones(10)], "sample_data")
+    # # First get the splitted person ids
+    # train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    # valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+    train_person_ids = read_from_pickle(get_train_valid_partition, "train_person_ids.pickle")
+    valid_person_ids = read_from_pickle(get_train_valid_partition, "test_person_ids.pickle")
+
+    train_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(train_person_ids))
+    valid_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(valid_person_ids))
+    train_labels = train_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
+    valid_labels = valid_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
+    train_recent_visits = train_recent_visits.drop(F.col("outcome"))
+    valid_recent_visits = valid_recent_visits.drop(F.col("outcome"))
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+
+    # train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # print(train_recent_visits.show())
+
+    train_person_info = obs_latent.filter(obs_latent["person_id"].isin(train_person_ids))
+    valid_person_info = obs_latent.filter(obs_latent["person_id"].isin(valid_person_ids))
+    # train_person_info = train_person_ids.join(person_information, on="person_id")
+    # valid_person_info = valid_person_ids.join(person_information, on="person_id")
+
+    print("start pre-processing!!!")
+    print(train_person_info)
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits2(train_person_ids, train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits2(valid_person_ids, valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+    print("finish pre-processing!!!")
+
+    visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+    data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+
+    train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+    valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+
+    valid_subset_ids = list(range(10))
+
+    subset_valid_visit_tensor_ls = [valid_visit_tensor_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_mask_ls = [valid_mask_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_time_step_ls = [valid_time_step_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_person_info_ls = [valid_person_info_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_label_tensor_ls = [valid_label_tensor_ls[idx] for idx in valid_subset_ids]    
+
+    # subset_valid_dataset = LongCOVIDVisitsDataset2(subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max)
+    write_to_pickle([visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max], "train_data")
+    write_to_pickle([valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max], "valid_data")
+    
+    write_to_pickle([subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max], "subset_valid_data")
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.27689177-ef6e-42b4-9673-d8052f7f0f92"),
+    add_date_diff_cols_2_400_600=Input(rid="ri.foundry.main.dataset.c7facd44-e20f-4bef-b413-d65a7feb192d"),
+    get_train_valid_partition=Input(rid="ri.foundry.main.dataset.1c438e0a-6066-41ff-b7a7-34352cf60ec5"),
+    top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
+)
+def Produce_obs_dataset_with_static_feature_2_400_600(top_k_concepts_data, add_date_diff_cols_2_400_600, get_train_valid_partition):
+    recent_visits = add_date_diff_cols_2_400_600
+    # def produce_dataset(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
+    print("start")
+    # unique_person_ids = obs_latent_sequence.select("person_id").distinct()
+    obs_latent = top_k_concepts_data
+    # unique_person_ids = list(recent_visits.select(F.col('person_id')).distinct().toPandas()['person_id'])
+
+    # empty_person_ids = list(recent_visits.filter(F.col("visit_date").isNull()).select(F.col("person_id")).distinct().toPandas()['person_id'])
+    # print("empty person ids::", unique_person_ids[0:10])
+
+    # print("empty person id count::", len(unique_person_ids))
+
+    # unique_person_ids = [idx for idx in unique_person_ids if idx not in empty_person_ids]
+
+    # print("unique person id count::", len(unique_person_ids))
+
+    # print("unique person ids::", unique_person_ids[0:10])
+
+    # random.shuffle(unique_person_ids)
+
+    # print("random unique person ids::", unique_person_ids[0:10])
+
+    # train_person_ids = unique_person_ids[0:int(len(unique_person_ids)*0.9)]
+    # valid_person_ids = unique_person_ids[int(len(unique_person_ids)*0.9):]
+
+    # spark.createDataFrame(data=dept, schema = deptColumns)
+    # write_to_pickle([torch.zeros(10), torch.ones(10)], "sample_data")
+    # # First get the splitted person ids
+    # train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    # valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+    train_person_ids = read_from_pickle(get_train_valid_partition, "train_person_ids.pickle")
+    valid_person_ids = read_from_pickle(get_train_valid_partition, "test_person_ids.pickle")
+
+    train_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(train_person_ids))
+    valid_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(valid_person_ids))
+    train_labels = train_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
+    valid_labels = valid_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
+    train_recent_visits = train_recent_visits.drop(F.col("outcome"))
+    valid_recent_visits = valid_recent_visits.drop(F.col("outcome"))
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+
+    # train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # print(train_recent_visits.show())
+
+    train_person_info = obs_latent.filter(obs_latent["person_id"].isin(train_person_ids))
+    valid_person_info = obs_latent.filter(obs_latent["person_id"].isin(valid_person_ids))
+    # train_person_info = train_person_ids.join(person_information, on="person_id")
+    # valid_person_info = valid_person_ids.join(person_information, on="person_id")
+
+    print("start pre-processing!!!")
+    print(train_person_info)
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits2(train_person_ids, train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits2(valid_person_ids, valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+    print("finish pre-processing!!!")
+
+    visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+    data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+
+    train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+    valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+
+    valid_subset_ids = list(range(10))
+
+    subset_valid_visit_tensor_ls = [valid_visit_tensor_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_mask_ls = [valid_mask_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_time_step_ls = [valid_time_step_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_person_info_ls = [valid_person_info_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_label_tensor_ls = [valid_label_tensor_ls[idx] for idx in valid_subset_ids]    
+
+    # subset_valid_dataset = LongCOVIDVisitsDataset2(subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max)
+    write_to_pickle([visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max], "train_data")
+    write_to_pickle([valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max], "valid_data")
+    
+    write_to_pickle([subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max], "subset_valid_data")
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.0687efb4-b4da-4627-aacd-a29d7c4dcb17"),
+    add_date_diff_cols_2_600_800=Input(rid="ri.vector.main.execute.01ce58e8-4b9a-4c5f-91b2-5d1c5e8da5bc"),
+    get_train_valid_partition=Input(rid="ri.foundry.main.dataset.1c438e0a-6066-41ff-b7a7-34352cf60ec5"),
+    top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
+)
+def Produce_obs_dataset_with_static_feature_2_600_800(top_k_concepts_data, add_date_diff_cols_2_600_800, get_train_valid_partition):
+    recent_visits = add_date_diff_cols_2_600_800
+    # def produce_dataset(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
+    print("start")
+    # unique_person_ids = obs_latent_sequence.select("person_id").distinct()
+    obs_latent = top_k_concepts_data
+    # unique_person_ids = list(recent_visits.select(F.col('person_id')).distinct().toPandas()['person_id'])
+
+    # empty_person_ids = list(recent_visits.filter(F.col("visit_date").isNull()).select(F.col("person_id")).distinct().toPandas()['person_id'])
+    # print("empty person ids::", unique_person_ids[0:10])
+
+    # print("empty person id count::", len(unique_person_ids))
+
+    # unique_person_ids = [idx for idx in unique_person_ids if idx not in empty_person_ids]
+
+    # print("unique person id count::", len(unique_person_ids))
+
+    # print("unique person ids::", unique_person_ids[0:10])
+
+    # random.shuffle(unique_person_ids)
+
+    # print("random unique person ids::", unique_person_ids[0:10])
+
+    # train_person_ids = unique_person_ids[0:int(len(unique_person_ids)*0.9)]
+    # valid_person_ids = unique_person_ids[int(len(unique_person_ids)*0.9):]
+
+    # spark.createDataFrame(data=dept, schema = deptColumns)
+    # write_to_pickle([torch.zeros(10), torch.ones(10)], "sample_data")
+    # # First get the splitted person ids
+    # train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    # valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+    train_person_ids = read_from_pickle(get_train_valid_partition, "train_person_ids.pickle")
+    valid_person_ids = read_from_pickle(get_train_valid_partition, "test_person_ids.pickle")
+
     train_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(train_person_ids))
     valid_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(valid_person_ids))
     train_labels = train_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
@@ -1808,6 +2277,103 @@ def add_date_diff_cols(obs_latent_sequence_2):
     recent_visits = recent_visits.withColumn("diff_days", datediff(recent_visits["visit_date"], recent_visits["min_visit_date"]))
     return recent_visits
     
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.1f76df35-5d2f-46f1-8197-d59658d15475"),
+    obs_latent_sequence_0=Input(rid="ri.foundry.main.dataset.171b1464-ba7a-41eb-a191-c026ceaa1ed1")
+)
+from pyspark.sql.functions import col, max as max_, min as min_
+from pyspark.sql.functions import datediff
+from pyspark.sql import SparkSession, Row
+import pyspark.sql.functions as F 
+def add_date_diff_cols_2(obs_latent_sequence_0):
+    recent_visits = obs_latent_sequence_0
+    min_person_visit_data = recent_visits.groupBy("person_id").agg(min_("visit_date"))
+    print("here")
+
+    # min_person_visit_data = min_person_visit_data.reset_index()
+    min_person_visit_data = min_person_visit_data.withColumnRenamed("min(visit_date)", "min_visit_date")
+    # min_person_visit_data.rename(columns={"min":"min_visit_date"}, inplace="True")
+
+    # recent_visits = recent_visits.merge(min_person_visit_data)
+    recent_visits = recent_visits.join(min_person_visit_data, on = "person_id")
+    
+    # recent_visits["diff_days"] = (recent_visits["visit_date"] - recent_visits["min_visit_date"]).dt.days.astype('int16')
+    recent_visits = recent_visits.withColumn("diff_days", datediff(recent_visits["visit_date"], recent_visits["min_visit_date"]))
+    return recent_visits
+    
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.e6675c90-881b-4eba-957f-072505753517"),
+    obs_latent_sequence_0_200_to_400=Input(rid="ri.foundry.main.dataset.bebb873c-0676-432e-8196-09ec28e09053")
+)
+from pyspark.sql.functions import col, max as max_, min as min_
+from pyspark.sql.functions import datediff
+from pyspark.sql import SparkSession, Row
+import pyspark.sql.functions as F 
+def add_date_diff_cols_2_200_400(obs_latent_sequence_0_200_to_400):
+    recent_visits = obs_latent_sequence_0_200_to_400
+    min_person_visit_data = recent_visits.groupBy("person_id").agg(min_("visit_date"))
+    print("here")
+
+    # min_person_visit_data = min_person_visit_data.reset_index()
+    min_person_visit_data = min_person_visit_data.withColumnRenamed("min(visit_date)", "min_visit_date")
+    # min_person_visit_data.rename(columns={"min":"min_visit_date"}, inplace="True")
+
+    # recent_visits = recent_visits.merge(min_person_visit_data)
+    recent_visits = recent_visits.join(min_person_visit_data, on = "person_id")
+    
+    # recent_visits["diff_days"] = (recent_visits["visit_date"] - recent_visits["min_visit_date"]).dt.days.astype('int16')
+    recent_visits = recent_visits.withColumn("diff_days", datediff(recent_visits["visit_date"], recent_visits["min_visit_date"]))
+    return recent_visits
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.c7facd44-e20f-4bef-b413-d65a7feb192d"),
+    obs_latent_sequence_0_400_to_600=Input(rid="ri.foundry.main.dataset.87b291fb-c532-44ec-9427-89eb450d4493")
+)
+from pyspark.sql.functions import col, max as max_, min as min_
+from pyspark.sql.functions import datediff
+from pyspark.sql import SparkSession, Row
+import pyspark.sql.functions as F 
+def add_date_diff_cols_2_400_600(obs_latent_sequence_0_400_to_600):
+    recent_visits = obs_latent_sequence_0_400_to_600
+    min_person_visit_data = recent_visits.groupBy("person_id").agg(min_("visit_date"))
+    print("here")
+
+    # min_person_visit_data = min_person_visit_data.reset_index()
+    min_person_visit_data = min_person_visit_data.withColumnRenamed("min(visit_date)", "min_visit_date")
+    # min_person_visit_data.rename(columns={"min":"min_visit_date"}, inplace="True")
+
+    # recent_visits = recent_visits.merge(min_person_visit_data)
+    recent_visits = recent_visits.join(min_person_visit_data, on = "person_id")
+    
+    # recent_visits["diff_days"] = (recent_visits["visit_date"] - recent_visits["min_visit_date"]).dt.days.astype('int16')
+    recent_visits = recent_visits.withColumn("diff_days", datediff(recent_visits["visit_date"], recent_visits["min_visit_date"]))
+    return recent_visits
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.01ce58e8-4b9a-4c5f-91b2-5d1c5e8da5bc"),
+    obs_latent_sequence_0_600_to_800=Input(rid="ri.foundry.main.dataset.c06cda84-379a-4c67-8111-8135014d0380")
+)
+from pyspark.sql.functions import col, max as max_, min as min_
+from pyspark.sql.functions import datediff
+from pyspark.sql import SparkSession, Row
+import pyspark.sql.functions as F 
+def add_date_diff_cols_2_600_800(obs_latent_sequence_0_600_to_800):
+    recent_visits = obs_latent_sequence_0_600_to_800
+    min_person_visit_data = recent_visits.groupBy("person_id").agg(min_("visit_date"))
+    print("here")
+
+    # min_person_visit_data = min_person_visit_data.reset_index()
+    min_person_visit_data = min_person_visit_data.withColumnRenamed("min(visit_date)", "min_visit_date")
+    # min_person_visit_data.rename(columns={"min":"min_visit_date"}, inplace="True")
+
+    # recent_visits = recent_visits.merge(min_person_visit_data)
+    recent_visits = recent_visits.join(min_person_visit_data, on = "person_id")
+    
+    # recent_visits["diff_days"] = (recent_visits["visit_date"] - recent_visits["min_visit_date"]).dt.days.astype('int16')
+    recent_visits = recent_visits.withColumn("diff_days", datediff(recent_visits["visit_date"], recent_visits["min_visit_date"]))
+    return recent_visits
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
@@ -4463,6 +5029,24 @@ def gb_hp_tuning(Long_COVID_Silver_Standard, all_patients_summary_fact_table_de_
     return predictions
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.1c438e0a-6066-41ff-b7a7-34352cf60ec5"),
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf")
+)
+def get_train_valid_partition(everyone_cohort_de_id):
+    Training_and_Holdout = everyone_cohort_de_id.sort_values('person_id')
+    Training_and_Holdout = Training_and_Holdout.sort_index(axis=1)
+    print(Training_and_Holdout)    
+    # if LOAD_TEST == 0:
+    X_train_no_ind, X_test_no_ind = train_test_split(Training_and_Holdout, train_size=0.9, random_state=1)
+    
+    # train_ids = list(X_train_no_ind.select(F.col('person_id')).distinct().toPandas()['person_id'])
+    # test_ids = list(X_test_no_ind.select(F.col('person_id')).distinct().toPandas()['person_id'])
+    train_ids = list(X_train_no_ind['person_id'].values.tolist())
+    test_ids = list(X_test_no_ind['person_id'].values.tolist())
+    write_to_pickle(train_ids, "train_person_ids")
+    write_to_pickle(test_ids, "test_person_ids")
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.71a84ecb-f5da-4847-937b-42a7fb9e1272"),
     location=Input(rid="ri.foundry.main.dataset.4805affe-3a77-4260-8da5-4f9ff77f51ab"),
     location_testing=Input(rid="ri.foundry.main.dataset.06b728e0-0262-4a7a-b9b7-fe91c3f7da34")
@@ -4871,9 +5455,12 @@ def obs_latent_sequence(observation, condition_occurrence, drug_exposure, proced
     observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
     procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
 )
+from pyspark.sql.functions import datediff
+from pyspark.sql.functions import col, max as max_, min as min_
+
 def obs_latent_sequence_0(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure):
     
-    k = 2000
+    k = 200
 
     procedure_occurrence = procedure_occurrence.withColumnRenamed('procedure_date','visit_date')
     condition_occurrence = condition_occurrence.withColumnRenamed('condition_start_date','visit_date')
@@ -4886,8 +5473,45 @@ def obs_latent_sequence_0(observation, condition_occurrence, drug_exposure, proc
 
     feats = Long_COVID_Silver_Standard.select(F.col("person_id"))
     table_id = 0
+
+    reduced_tables = {}
+
+    union_table = None
+
     for TABLE, CONCEPT_ID_COL in tables.items():
-        # print(TABLE.show())
+        TABLE = TABLE.select(F.col("person_id"), F.col("visit_date"))
+        if union_table is None:
+            union_table = TABLE
+        else:
+            union_table = union_table.union(TABLE)
+
+    # last_visit = all_patients_visit_day_facts_table_de_id \
+    #     .groupby("person_id")["visit_date"] \
+    #     .max() \
+    #     .reset_index("person_id") \
+    #     .rename(columns={"visit_date": "last_visit_date"})
+    
+    # # Add a six-month before the last visit column to the dataframe
+    # last_visit["six_month_before_last_visit"] = last_visit["last_visit_date"].map(lambda x: x - pd.Timedelta(days=180))
+
+    last_visit = union_table \
+        .groupBy("person_id") \
+        .agg(max_("visit_date")).withColumnRenamed("max(visit_date)", "last_visit_date")
+    last_visit = last_visit.withColumn("six_month_before_last_visit", F.date_sub(last_visit["last_visit_date"], 180))
+
+    for TABLE, CONCEPT_ID_COL in tables.items():
+        
+        print("original table size::", TABLE.count())
+
+        df = TABLE.join(last_visit, on = "person_id", how = "left")
+
+        df = df.where(datediff(df["visit_date"], df["six_month_before_last_visit"]) > 0)
+        reduced_tables[df] = CONCEPT_ID_COL
+        print(df)
+        print("reduced table size::", df.count())
+
+    for TABLE, CONCEPT_ID_COL in reduced_tables.items():
+        print(TABLE.show())
         TABLE = TABLE.select(F.col("person_id"), F.col("visit_date"), F.col(CONCEPT_ID_COL))             
         distinct = TABLE.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).limit(k).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
         df = TABLE.filter(F.col(CONCEPT_ID_COL).isin(distinct))
@@ -4904,10 +5528,70 @@ def obs_latent_sequence_0(observation, condition_occurrence, drug_exposure, proc
         else:
             feats = feats.join(df, on=list(set(df.columns)&set(feats.columns)), how = "outer")
         table_id += 1
+        print(feats.show())
+        print()
+        print()
+
+    unique_person_ids = list(feats.select(F.col('person_id')).distinct().toPandas()['person_id'])
+
+    print("total person count:", len(unique_person_ids))
+
+    empty_person_ids = list(feats.filter(F.col("visit_date").isNull()).select(F.col("person_id")).distinct().toPandas()['person_id'])
+
+    unique_person_ids = [idx for idx in unique_person_ids if idx not in empty_person_ids]
+
+    print("remaining person count:", len(unique_person_ids))
+
+    feats = feats.filter(feats["person_id"].isin(unique_person_ids))
+
+    # for table in list(tables.keys()):
+        
+
+    
     # data = feats.na.fill(0).join(labels_df, "person_id")
     data = feats.join(labels_df, "person_id")
     print("finish!!")
     return data
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.bebb873c-0676-432e-8196-09ec28e09053"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
+    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
+    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
+    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7"),
+    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
+    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
+)
+def obs_latent_sequence_0_200_to_400(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure):
+    return obtain_latent_sequence(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure, k = 200, start_id=1)
+    
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.87b291fb-c532-44ec-9427-89eb450d4493"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
+    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
+    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
+    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7"),
+    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
+    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
+)
+def obs_latent_sequence_0_400_to_600(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure):
+    return obtain_latent_sequence(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure, k = 200, start_id=2)
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.c06cda84-379a-4c67-8111-8135014d0380"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
+    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
+    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
+    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7"),
+    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
+    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
+)
+def obs_latent_sequence_0_600_to_800(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure):
+    return obtain_latent_sequence(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure, k = 200, start_id=3)
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.9738c306-6d58-457d-8fbe-7d1d5a09ef01"),
@@ -6336,8 +7020,8 @@ def train_sequential_model_new_with_static_feature(Produce_obs_dataset_with_stat
     # valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
 
     # data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
-    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max = read_from_pickle(Produce_obs_dataset_2, "train_data.pickle")
-    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, _,_ = read_from_pickle(Produce_obs_dataset_2, "valid_data.pickle")
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max = read_from_pickle(Produce_obs_dataset_with_static_feature, "train_data.pickle")
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, _,_ = read_from_pickle(Produce_obs_dataset_with_static_feature, "valid_data.pickle")
     train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
 
     valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
@@ -6354,7 +7038,7 @@ def train_sequential_model_new_with_static_feature(Produce_obs_dataset_with_stat
     epochs=10
     print(train_dataset.__getitem__(1)[0])
     dim = train_dataset.__getitem__(1)[0].shape[-1]
-    # static_input_dim = train_dataset.__getitem__(1)[3].shape[-1]
+    static_input_dim = train_dataset.__getitem__(1)[3].shape[-1]
     print("data shape::", train_dataset.__getitem__(1)[0].shape)
     print("mask shape::", train_dataset.__getitem__(1)[1].shape)
     print("dim::", dim)
@@ -6366,7 +7050,7 @@ def train_sequential_model_new_with_static_feature(Produce_obs_dataset_with_stat
     num_ref_points=128
     gen_hidden=30
     dec_num_heads=1
-    classifier = create_classifier(latent_dim, 20, has_static=False)
+    classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
     device = torch.device(
         'cuda' if torch.cuda.is_available() else 'cpu')
     print("device::", device)
@@ -6420,6 +7104,180 @@ def train_sequential_model_new_with_static_feature(Produce_obs_dataset_with_stat
     # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, sampler=sampler, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
     # print("start training::")
 
+
+    # classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    # device = torch.device(
+    #     'cuda' if torch.cuda.is_available() else 'cpu')
+    # print("device::", device)
+    # rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    # dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+
+    # rec = rec.to(device)
+    # dec = dec.to(device)
+    # classifier = classifier.to(device)
+    best_valid_true, best_valid_pred_labels, best_train_true, best_train_pred_labels, rec_state_dict, dec_state_dict, classifier_state_dict = train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
+    device = torch.device('cpu')
+    write_to_pickle(rec_state_dict, "mTans_rec")
+    write_to_pickle(dec_state_dict, "mTans_dec")
+    write_to_pickle(classifier_state_dict, "mTans_classifier")
+    # read_from_pickle()
+    print("save models successfully")
+    # Make predictions on test data
+    # df = testing_data[['median_income', 'housing_median_age', 'total_rooms']]
+    # predictions = my_model.predict(df)
+    # df['predicted_house_values'] = pd.DataFrame(predictions)    
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.62832a7b-121e-45a3-a04f-657c6c8fa493"),
+    Produce_obs_dataset_with_static_feature_2=Input(rid="ri.foundry.main.dataset.051f4281-a989-4f89-85d0-d641e2afe2b0")
+)
+import pandas as pd
+
+def train_sequential_model_new_with_static_feature_2(Produce_obs_dataset_with_static_feature_2):
+
+    print("start")
+    # dim=10
+    # latent_dim=20
+    # rec_hidden=32
+    # learn_emb=True
+    # enc_num_heads=1
+    # num_ref_points=128
+    # gen_hidden=30
+    # dec_num_heads=1
+    # static_input_dim = 10
+    # classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    # device = torch.device(
+    #     'cuda' if torch.cuda.is_available() else 'cpu')
+    # print("device::", device)
+    # rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    # dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    # lr = 0.0005
+
+    # write_to_pickle(rec.state_dict(), "mTans_rec")
+    # write_to_pickle(dec.state_dict(), "mTans_dec")
+    # write_to_pickle(classifier.state_dict(), "mTans_classifier")
+
+    # First get the splitted person ids
+    # train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    # valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+
+    # train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # # print(train_recent_visits.show())
+
+    # train_person_info = train_person_ids.join(person_information, on="person_id")
+    # valid_person_info = valid_person_ids.join(person_information, on="person_id")
+    # # train_person_ids = train_valid_split.loc[train_valid_split["split"] == "train"]
+    # # valid_person_ids = train_valid_split.loc[train_valid_split["split"] == "valid"]
+
+    # # Use it to split the data into training x/y and validation x/y
+    # # train_recent_visits = train_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
+    # # valid_recent_visits = valid_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
+    # # train_labels = train_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+    # # valid_labels = valid_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+
+    # # Basic person information
+    # # train_person_info = train_person_ids.merge(person_information, on="person_id")
+    # # valid_person_info = valid_person_ids.merge(person_information, on="person_id")
+    
+
+    # print("start pre-processing!!!")
+    # visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids.toPandas(), train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both")
+    # # torch.save(visit_tensor_ls, "train_visit_tensor_ls")
+    # # torch.save(mask_ls, "train_mask_ls")
+    # # torch.save(time_step_ls, "train_mask_ls")
+    # # torch.save(label_tensor_ls, "train_label_tensor_ls")
+    # # torch.save(person_info_ls, "train_person_info_ls")
+    
+    # # visit_tensor_ls, mask_ls = remove_empty_columns(visit_tensor_ls, mask_ls)
+
+    # valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids.toPandas(), valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both")
+    # print("finish pre-processing!!!")
+    # visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    # valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+    # data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max = read_from_pickle(Produce_obs_dataset_with_static_feature_2, "train_data.pickle")
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, _,_ = read_from_pickle(Produce_obs_dataset_with_static_feature_2, "valid_data.pickle")
+    train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+    valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+
+    # write_to_pickle(train_dataset, "train_dataset")
+    # write_to_pickle(valid_dataset, "valid_dataset")
+    # train_dataset = LongCOVIDVisitsDataset2(train_person_ids, train_person_info, train_recent_visits, train_labels)
+    # valid_dataset = LongCOVIDVisitsDataset2(valid_person_ids, valid_person_info, valid_recent_visits, valid_labels)
+
+    # Construct dataloaders
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=4, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+
+    epochs=10
+    print(train_dataset.__getitem__(1)[0])
+    dim = train_dataset.__getitem__(1)[0].shape[-1]
+    static_input_dim = train_dataset.__getitem__(1)[3].shape[-1]
+    print("data shape::", train_dataset.__getitem__(1)[0].shape)
+    print("mask shape::", train_dataset.__getitem__(1)[1].shape)
+    print("dim::", dim)
+    print(data_min)
+    latent_dim=20
+    rec_hidden=32
+    learn_emb=True
+    enc_num_heads=1
+    num_ref_points=128
+    gen_hidden=30
+    dec_num_heads=1
+    classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    device = torch.device(
+        'cuda' if torch.cuda.is_available() else 'cpu')
+    print("device::", device)
+    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    lr = 0.0005
+
+    
+
+    rec = rec.to(device)
+    dec = dec.to(device)
+    classifier = classifier.to(device)
+
+    # rec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_rec.pickle'))
+    # dec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_dec.pickle'))
+    # classifier.load_state_dict(read_model_from_pickle(train_sequential_model_3, "mTans_classifier.pickle"))
+    # print("load model successfully")
+    # print("start evaluating model::")
+
+    # val_loss, val_acc, val_auc, val_recall, val_precision, _,_ = evaluate_classifier(rec, train_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+
+    # print("validation performance at epoch::", 0)
+    # print("validation loss::", val_loss)
+    # print("validation accuracy::", val_acc)
+    # print("validation auc score::", val_auc)
+    # print("validation recall::", val_recall)
+    # print("validation precision score::", val_precision)
+
+    # _, _, _, _, _, best_train_true, best_train_pred_labels = evaluate_classifier(rec, train_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+
+    
+
+    # incorrect_labeled_train_ids = torch.from_numpy(np.nonzero(best_train_true.reshape(-1) != best_train_pred_labels.reshape(-1))[0])
+    # print("incorrect_labeled_train_ids::", incorrect_labeled_train_ids)
+    # print("incorrect_labeled_train_ids count::", len(incorrect_labeled_train_ids))
+    # incorrect_sample_weight=2
+
+    # pos_ids = torch.tensor([idx for idx in range(len(train_dataset.label_tensor_ls)) if train_dataset.label_tensor_ls[idx] == 1])
+    # neg_ids = torch.tensor([idx for idx in range(len(train_dataset.label_tensor_ls)) if train_dataset.label_tensor_ls[idx] == 0])
+    # print("positive training count::", len(pos_ids))
+    # print("negative training count::", len(neg_ids))
+
+    # train_set_weight = torch.ones(len(train_dataset))
+    # train_set_weight[pos_ids] = incorrect_sample_weight
+    # train_set_weight = train_set_weight/incorrect_sample_weight
+    # sampler = torch.utils.data.sampler.WeightedRandomSampler(train_set_weight, len(train_set_weight))
+    # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, sampler=sampler, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    # print("start training::")
 
     # classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
     # device = torch.device(
