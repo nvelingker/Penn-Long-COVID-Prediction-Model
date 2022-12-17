@@ -18,6 +18,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import classification_report
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import RepeatedKFold
+from sklearn.feature_selection import VarianceThreshold
 import numpy as np
 from matplotlib import pyplot as plt
 import time
@@ -25,6 +26,8 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import IntegerType
 
 import random
+import pyspark
+from sklearn.model_selection import ShuffleSplit
 
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
@@ -4281,7 +4284,7 @@ def lr2_hp_tuning(all_patients_summary_fact_table_de_id, Long_COVID_Silver_Stand
 
 @transform_pandas(
     Output(rid="ri.vector.main.execute.5f501591-3819-462a-bfad-9ead2eaf6581"),
-    obs_latent=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
+    top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
 )
 def lr2_hp_tuning_copied(obs_latent):
     X = obs_latent.drop("outcome", axis=1)
@@ -4291,14 +4294,14 @@ def lr2_hp_tuning_copied(obs_latent):
     X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
 
     model = LogisticRegression()
-    C = [0.001, 0.01, 0.1, 1,10,100, 1000]
+    C = [0.001, 0.01, 0.1, 1,10]
     fit_intercept = [False,True]
-    solver = ['lbfgs', 'liblinear', 'newton-cg', 'newton-cholesky', 'sag', 'saga']
+    solver = ['lbfgs', 'liblinear', 'newton-cg']
     class_weight=['balanced']
     grid = dict(C=C,fit_intercept=fit_intercept,solver=solver,class_weight=class_weight)
 
     cvFold = RepeatedKFold(n_splits=5, n_repeats=3, random_state=1)
-    randomSearch = RandomizedSearchCV(estimator=model, n_iter=60, n_jobs=-1, cv=cvFold, param_distributions=grid,verbose=2,refit=True, scoring='f1').fit(X,y)
+    randomSearch = RandomizedSearchCV(estimator=model, n_iter=15, n_jobs=-1, cv=cvFold, param_distributions=grid,refit=True, scoring='f1').fit(X,y)
     params=randomSearch.best_estimator_.get_params()
     print("All params: \n", params)
 
@@ -4493,44 +4496,6 @@ def microvisits_to_macrovisits_testing_copy(microvisits_to_macrovisits_testing, 
     return microvisits_to_macrovisits_testing if LOAD_TEST == 1 else microvisits_to_macrovisits
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.72286694-e3b3-4196-b465-79dd27fc01a7"),
-    obs_latent=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
-)
-def model(obs_latent):
-    X = obs_latent.drop("outcome", axis=1)
-    y = obs_latent.loc[:,"outcome"]
-
-    X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(X, y, train_size=0.9, random_state=1)
-    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
-    
-
-    lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=0, max_iter=500, class_weight = 'balanced').fit(X_train, y_train)
-    rfc = RandomForestClassifier().fit(X_train, y_train)
-    gbc = GradientBoostingClassifier().fit(X_train, y_train)
-
-    lr_test_preds = lrc.predict_proba(X_test)[:, 1]
-    rf_test_preds = rfc.predict_proba(X_test)[:, 1]
-    gb_test_preds = gbc.predict_proba(X_test)[:, 1]
-
-    df = pd.DataFrame.from_dict({
-        'person_id': list(X_test_no_ind["person_id"]),
-        'lr_outcome': lr_test_preds.tolist(),
-        'rf_outcome': rf_test_preds.tolist(),
-        'gb_outcome': gb_test_preds.tolist(),
-        'outcome': y_test
-    }, orient='columns')
-
-    print("LR Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["lr_outcome"] > 0.5, 1, 0))))
-    print("RF Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["rf_outcome"] > 0.5, 1, 0))))
-    print("GB Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["gb_outcome"] > 0.5, 1, 0))))
-    outcomes = ['lr_outcome', 'rf_outcome', 'gb_outcome']
-    df['ens_outcome'] = df.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
-    print("ENS Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["ens_outcome"] > 0.5, 1, 0))))
-
-    
-    
-
-@transform_pandas(
     Output(rid="ri.foundry.main.dataset.d0963ac3-a28e-4423-bb15-758b9607be79"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
     all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6")
@@ -4602,39 +4567,6 @@ def num_recent_visits(recent_visits_2):
     return df
 
 @transform_pandas(
-    Output(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58"),
-    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
-    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
-    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
-    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
-    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7"),
-    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
-    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
-)
-def obs_latent(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure):
-    tables = {procedure_occurrence:"procedure_concept_id",condition_occurrence:"condition_concept_id", drug_exposure:"drug_concept_id", observation:"observation_concept_id", measurement:"measurement_concept_id", device_exposure:"device_concept_id"}
-    k = 2000
-
-    labels_df = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"])).select(F.col("person_id"), F.col("outcome"))
-
-    feats = Long_COVID_Silver_Standard.select(F.col("person_id"))
-    for TABLE, CONCEPT_ID_COL in tables.items():
-        TABLE = TABLE.select(F.col("person_id"), F.col(CONCEPT_ID_COL))             
-        distinct = TABLE.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).limit(k).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
-        df = TABLE.filter(F.col(CONCEPT_ID_COL).isin(distinct))
-        df= df.groupBy("person_id").pivot(CONCEPT_ID_COL).agg(F.lit(1)).na.fill(0)
-        df = df.select([F.col(c).alias(CONCEPT_ID_COL[:3]+c) if c != "person_id" else c for c in df.columns ])
-        feats = feats.join(df, "person_id", "left")
-    data = feats.na.fill(0).join(labels_df, "person_id")
-    
-    return data
-    
-        
-    
-
-    
-
-@transform_pandas(
     Output(rid="ri.foundry.main.dataset.99cb0e77-4710-4cc5-b904-57ebc3339cf2"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
     condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
@@ -4699,7 +4631,7 @@ def obs_latent_sequence(observation, condition_occurrence, drug_exposure, proced
 )
 def obs_latent_sequence_0(observation, condition_occurrence, drug_exposure, procedure_occurrence, Long_COVID_Silver_Standard, measurement, device_exposure):
     
-    k = 200
+    k = 2000
 
     procedure_occurrence = procedure_occurrence.withColumnRenamed('procedure_date','visit_date')
     condition_occurrence = condition_occurrence.withColumnRenamed('condition_start_date','visit_date')
@@ -5269,6 +5201,143 @@ def top_concept_ids(condition_table_analysis, device_table_analysis_1, drug_tabl
     r = observation_table_analysis_1.union(procedure_table_analysis_1).union(drug_table_analysis_1).union(device_table_analysis_1).union(condition_table_analysis)
     r = r.withColumn("scale_above_.8", F.when((F.col("max") > 0.8), F.col("max")*F.col("count")).otherwise(F.lit(0)))
     return r
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58"),
+    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
+    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
+    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
+    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7"),
+    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
+    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
+)
+def top_k_concepts_data(observation, condition_occurrence, drug_exposure, procedure_occurrence, measurement, device_exposure, everyone_cohort_de_id):
+    tables = {procedure_occurrence:("procedure_concept_id",1000),condition_occurrence:("condition_concept_id",1000), drug_exposure:("drug_concept_id",1000), observation:("observation_concept_id",1000), measurement:("measurement_concept_id",1000), device_exposure:("device_concept_id",1000)}
+
+    feats = everyone_cohort_de_id.select(F.col("person_id"))
+    for TABLE, (CONCEPT_ID_COL,k) in tables.items():
+        TABLE = TABLE.select(F.col("person_id"), F.col(CONCEPT_ID_COL))                 
+        distinct = TABLE.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).limit(k).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
+        df = TABLE.filter(F.col(CONCEPT_ID_COL).isin(distinct))
+        df= df.groupBy("person_id").pivot(CONCEPT_ID_COL).agg(F.lit(1)).na.fill(0)
+        df = df.select([F.col(c).alias(CONCEPT_ID_COL[:3]+c) if c != "person_id" else c for c in df.columns ])
+        feats = feats.join(df, how="left",on="person_id")
+    data = feats.na.fill(0)
+    
+    return data
+    
+        
+    
+
+    
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.10a82ffa-f748-4e12-9c88-0f8fc74dcd7f"),
+    condition_occurrence_testing_copy=Input(rid="ri.foundry.main.dataset.a32b3d71-226c-4347-aaed-2c4900e2f4fb"),
+    device_exposure_testing_copy=Input(rid="ri.foundry.main.dataset.ca1772cd-c245-453d-ac74-d0c42e490f2e"),
+    drug_exposure_testing_copy=Input(rid="ri.foundry.main.dataset.6223d2b6-e8b8-4d48-8c4c-81dd2959d131"),
+    everyone_cohort_de_id_testing=Input(rid="ri.foundry.main.dataset.4f510f7a-bb5b-455d-bb9d-7bcbae1a37b4"),
+    measurement_testing_copy=Input(rid="ri.foundry.main.dataset.92566631-b0d5-4fab-8a14-5c3d0d6ad560"),
+    observation_testing_copy=Input(rid="ri.foundry.main.dataset.9834f887-c80e-478c-b538-5bb39b9db6a7"),
+    procedure_occurrence_testing_copy=Input(rid="ri.foundry.main.dataset.2d76588c-fe75-4d07-8044-f054444ec728"),
+    top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
+)
+def top_k_concepts_data_test(device_exposure_testing_copy, procedure_occurrence_testing_copy, observation_testing_copy, drug_exposure_testing_copy, measurement_testing_copy, condition_occurrence_testing_copy, everyone_cohort_de_id_testing, top_k_concepts_data):
+    tables = {procedure_occurrence_testing_copy:("procedure_concept_id",1000),condition_occurrence_testing_copy:("condition_concept_id",1000), drug_exposure_testing_copy:("drug_concept_id",1000), observation_testing_copy:("observation_concept_id",1000), measurement_testing_copy:("measurement_concept_id",1000), device_exposure_testing_copy:("device_concept_id",1000)}
+
+    feats = everyone_cohort_de_id_testing.select(F.col("person_id"))
+    for TABLE, (CONCEPT_ID_COL,k) in tables.items():
+        TABLE = TABLE.select(F.col("person_id"), F.col(CONCEPT_ID_COL))                 
+        distinct = [i[3:] for i in top_k_concepts_data.columns if i[:3] == CONCEPT_ID_COL[:3]]
+        df = TABLE.filter(F.col(CONCEPT_ID_COL).isin(distinct))
+        df= df.groupBy("person_id").pivot(CONCEPT_ID_COL).agg(F.lit(1)).na.fill(0)
+        df = df.select([F.col(c).alias(CONCEPT_ID_COL[:3]+c) if c != "person_id" else c for c in df.columns ])
+        feats = feats.join(df, how="left",on="person_id")
+    data = feats.na.fill(0)
+    
+    return data
+    
+        
+    
+
+    
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.9b948015-110d-418f-8da7-794e5b4a8278"),
+    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
+    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
+    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
+    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
+    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7"),
+    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
+    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
+)
+def top_k_to_k2_concepts_data_copied(observation, condition_occurrence, drug_exposure, procedure_occurrence, measurement, device_exposure, everyone_cohort_de_id):
+    tables = {procedure_occurrence:("procedure_concept_id",500),condition_occurrence:("condition_concept_id",500), drug_exposure:("drug_concept_id",500), observation:("observation_concept_id",500), measurement:("measurement_concept_id",500), device_exposure:("device_concept_id",500)}
+
+    feats = everyone_cohort_de_id.select(F.col("person_id"))
+    for TABLE, (CONCEPT_ID_COL,k) in tables.items():
+        TABLE = TABLE.select(F.col("person_id"), F.col(CONCEPT_ID_COL))                 
+        distinct = TABLE.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).limit(k).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
+        df = TABLE.filter(~F.col(CONCEPT_ID_COL).isin(distinct))
+        distinct = df.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).limit(k).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
+        df= df.groupBy("person_id").pivot(CONCEPT_ID_COL).agg(F.lit(1)).na.fill(0)
+        df = df.select([F.col(c).alias(CONCEPT_ID_COL[:3]+c) if c != "person_id" else c for c in df.columns ])
+        feats = feats.join(df, how="left",on="person_id")
+    data = feats.na.fill(0)
+    
+    return data
+    
+        
+    
+
+    
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.0d79b493-848a-4b79-bcb3-923bf5a3b366"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
+)
+def topkconcepts(top_k_concepts_data, Long_COVID_Silver_Standard):
+    Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda r: max(r.pasc_code_after_four_weeks,r.pasc_code_prior_four_weeks), axis=1)
+    Long_COVID_Silver_Standard = Long_COVID_Silver_Standard[["person_id","outcome"]]
+    top_k_concepts_data = top_k_concepts_data.merge(Long_COVID_Silver_Standard, how="left", on="person_id")
+    X = top_k_concepts_data.drop("outcome", axis=1)
+    y = top_k_concepts_data.loc[:,"outcome"]
+
+    X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(X, y, train_size=0.9, random_state=1)
+    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+    
+    lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=1, max_iter=500).fit(X_train, y_train)
+    lrc2 = LogisticRegression(penalty='l2', solver='liblinear', random_state=1, max_iter=500, class_weight = 'balanced').fit(X_train, y_train)
+    rfc = RandomForestClassifier(random_state=1).fit(X_train, y_train)
+    gbc = GradientBoostingClassifier(random_state=1,).fit(X_train, y_train)
+
+    lr_test_preds = lrc.predict_proba(X_test)[:, 1]
+    lr2_test_preds = lrc2.predict_proba(X_test)[:, 1]
+    rf_test_preds = rfc.predict_proba(X_test)[:, 1]
+    gb_test_preds = gbc.predict_proba(X_test)[:, 1]
+
+    df = pd.DataFrame.from_dict({
+        'person_id': list(X_test_no_ind["person_id"]),
+        'lr_outcome': lr_test_preds.tolist(),
+        'lr2_outcome': lr2_test_preds.tolist(),
+        'rf_outcome': rf_test_preds.tolist(),
+        'gb_outcome': gb_test_preds.tolist(),
+        'outcome': y_test
+    }, orient='columns')
+
+    print("LR Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["lr_outcome"] > 0.5, 1, 0))))
+    print("LR2 Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["lr2_outcome"] > 0.5, 1, 0))))
+    print("RF Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["rf_outcome"] > 0.5, 1, 0))))
+    print("GB Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["gb_outcome"] > 0.5, 1, 0))))
+    outcomes = ['lr_outcome', 'rf_outcome', 'gb_outcome']
+    df['ens_outcome'] = df.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
+    print("ENS Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["ens_outcome"] > 0.5, 1, 0))))
+    return df
+    
+    
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.e870e250-353c-4263-add9-98ce1858f0c6"),
@@ -5974,11 +6043,18 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
 
     for col in all_patients_summary_fact_table_de_id.columns:
         if col not in all_patients_summary_fact_table_de_id_testing.columns:
-            print(col, " not in testing set.")
-            all_patients_summary_fact_table_de_id_testing[col] = 0 
-            
+            print(col, " not in summary testing set.")
+            all_patients_summary_fact_table_de_id_testing[col] = 0
+    for col in all_patients_summary_fact_table_de_id_testing.columns:
+        if col not in all_patients_summary_fact_table_de_id.columns:
+            print(col, " not in summary training set.")
+            all_patients_summary_fact_table_de_id_testing.drop(col, axis=1)
+
     Training_and_Holdout = all_patients_summary_fact_table_de_id[cols].fillna(0.0).sort_values('person_id')
+    Training_and_Holdout = Training_and_Holdout.sort_index(axis=1)
     Testing = all_patients_summary_fact_table_de_id_testing[cols].fillna(0.0).sort_values('person_id')
+    Testing = Testing.sort_index(axis=1)
+    
     if LOAD_TEST == 0:
         X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
     else:
@@ -6449,6 +6525,88 @@ def train_test_model_with_sequence_model_2(all_patients_summary_fact_table_de_id
     print("validation classification Report:\n{}".format(classification_report(y_test.reshape(-1).astype(int), Y_final_pred.reshape(-1))))
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.2b8fbb2f-c6a4-4402-bcbc-b0925e8e1003"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58"),
+    top_k_concepts_data_test=Input(rid="ri.foundry.main.dataset.10a82ffa-f748-4e12-9c88-0f8fc74dcd7f")
+)
+def train_test_top_k_model(top_k_concepts_data, top_k_concepts_data_test, Long_COVID_Silver_Standard):
+    ## get outcome column
+    cols = top_k_concepts_data.columns
+
+    Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
+    Outcome_df = top_k_concepts_data[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
+    Outcome_df = Outcome_df[["person_id", "outcome"]].sort_values('person_id')
+
+    Outcome = list(Outcome_df["outcome"])
+
+    for col in top_k_concepts_data.columns:
+        if col not in top_k_concepts_data_test.columns:
+            print(col, " not in summary testing set.")
+            top_k_concepts_data_test[col] = 0
+    for col in top_k_concepts_data_test.columns:
+        if col not in top_k_concepts_data.columns:
+            print(col, " not in summary training set.")
+            top_k_concepts_data_test.drop(col, axis=1)
+    Training_and_Holdout = top_k_concepts_data.fillna(0.0).sort_values('person_id')
+    Training_and_Holdout = Training_and_Holdout.sort_index(axis=1)
+    Testing = top_k_concepts_data_test.fillna(0.0).sort_values('person_id')
+    Testing = Testing.sort_index(axis=1)
+    if LOAD_TEST == 0:
+        X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+    else:
+        X_train_no_ind, y_train = Training_and_Holdout, Outcome
+        X_test_no_ind, y_test = Testing, None
+    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+
+    lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=1, max_iter=500).fit(X_train, y_train)
+    lrc2 = LogisticRegression(penalty='l2', solver='liblinear', random_state=1, max_iter=500, class_weight='balanced').fit(X_train, y_train)
+    rfc = RandomForestClassifier(random_state=1).fit(X_train, y_train)
+    gbc = GradientBoostingClassifier(random_state=1).fit(X_train, y_train)
+
+    lrc_sort_features = np.argsort(lrc.coef_.flatten())[-20:]
+    lrc_sort_features_least = np.argsort(lrc.coef_.flatten())[:20]
+    rfc_sort_features = np.argsort(rfc.feature_importances_.flatten())[-20:]
+    rfc_sort_features_least = np.argsort(rfc.feature_importances_.flatten())[:20]
+    plt.bar(np.arange(20), rfc.feature_importances_.flatten()[rfc_sort_features])
+    plt.xticks(np.arange(20), [cols[1:][i] for i in rfc_sort_features], rotation='vertical')
+    plt.tight_layout()
+    plt.show()
+
+    print("lrc important features:", [cols[1:][int(i)] for i in lrc_sort_features])
+    print("rfc important features:", [cols[1:][int(i)] for i in rfc_sort_features])
+    print("lrc least important features:", [cols[1:][int(i)] for i in lrc_sort_features_least ])
+    print("rfc least important features:", [cols[1:][int(i)] for i in rfc_sort_features_least ])
+    print("combined least important features:", [cols[1:][int(i)] for i in rfc_sort_features_least if i in lrc_sort_features_least])
+    nn_scaler = StandardScaler().fit(X_train)
+    nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
+
+    print(X_test.shape)
+    lr_test_preds = lrc.predict_proba(X_test)[:, 1]
+    lr_train_preds = lrc.predict_proba(X_train)[:, 1]
+    lr2_test_preds = lrc2.predict_proba(X_test)[:, 1]
+    rf_test_preds = rfc.predict_proba(X_test)[:, 1]
+    rf_train_preds = rfc.predict_proba(X_train)[:, 1]
+    gb_test_preds = gbc.predict_proba(X_test)[:, 1]
+    nnc_test_preds = nnc.predict_proba(nn_scaler.transform(X_test))[:, 1]
+
+    predictions = pd.DataFrame.from_dict({
+        'person_id': list(X_test_no_ind["person_id"]),
+        'tk_lr_outcome': lr_test_preds.tolist(),
+        'tk_lr2_outcome': lr2_test_preds.tolist(),
+        'tk_rf_outcome': rf_test_preds.tolist(),
+        'tk_gb_outcome': gb_test_preds.tolist(),
+        'tk_nn_outcome': nnc_test_preds.tolist(),
+    }, orient='columns')
+    
+    if MERGE_LABEL  == 1:
+        predictions = predictions.merge(Outcome_df, on="person_id", how="left")
+    outcomes = ['tk_lr2_outcome', 'tk_rf_outcome', 'tk_gb_outcome']
+    predictions['tk_ens_outcome'] = predictions.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
+
+    return predictions
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.9d1a79f6-7627-4ee4-abc0-d6d6179c2f26"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
     num_recent_visits=Input(rid="ri.foundry.main.dataset.d39564f3-817f-4b8a-a8b6-81d4f8fd6bf1")
@@ -6471,20 +6629,18 @@ def train_valid_split( Long_COVID_Silver_Standard, num_recent_visits):
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.def6f994-533b-46b8-95ab-3708d867119c"),
-    train_test_model=Input(rid="ri.foundry.main.dataset.ea6c836a-9d51-4402-b1b7-0e30fb514fc8")
+    train_test_model=Input(rid="ri.foundry.main.dataset.ea6c836a-9d51-4402-b1b7-0e30fb514fc8"),
+    train_test_top_k_model=Input(rid="ri.foundry.main.dataset.2b8fbb2f-c6a4-4402-bcbc-b0925e8e1003")
 )
-def validation_metrics( train_test_model):
-    df = train_test_model
+def validation_metrics( train_test_model, train_test_top_k_model):
+    train_test_top_k_model = train_test_top_k_model.drop("outcome", axis=1)
+    df = train_test_model.merge(train_test_top_k_model, on="person_id", how="left")
 
-    outcomes = ['lr2_outcome', 'rf_outcome', 'gb_outcome']
-    df['ens_outcome'] = df.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
-    
-    print("LR Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["lr_outcome"] > 0.5, 1, 0))))
-    print("LR2 Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["lr2_outcome"] > 0.5, 1, 0))))
-    print("RF Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["rf_outcome"] > 0.5, 1, 0))))
-    print("GB Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["gb_outcome"] > 0.5, 1, 0))))
-    print("NN Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["nn_outcome"] > 0.5, 1, 0))))
-    print("Ensemble Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["ens_outcome"] > 0.5, 1, 0))))
+    outcomes = [i for i in df.columns if i.endswith("_outcome") and not "ens" in i and not "nn" in i]
+    print(outcomes)
+    df['all_ens_outcome'] = df.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
+    for i in [i for i in df.columns if i != "person_id"]:
+        print("{} Classification Report:\n{}".format(i, classification_report(df["outcome"], np.where(df[i] > 0.5, 1, 0))))
 
     print("LR MAE:", mean_absolute_error(df['outcome'], np.where(df["lr_outcome"] > 0.5, 1, 0)))
     print("LR Brier score:", brier_score_loss(df['outcome'], df["lr_outcome"]))
