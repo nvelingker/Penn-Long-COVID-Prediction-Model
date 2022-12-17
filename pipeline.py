@@ -6696,6 +6696,8 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     gb_test_preds = gbc.predict_proba(X_test)[:, 1]
     nnc_test_preds = nnc.predict_proba(nn_scaler.transform(X_test))[:, 1]
 
+    print(X_train.shape)
+    print(X_test.shape)
     predictions = pd.DataFrame.from_dict({
         'person_id': list(X_test_no_ind["person_id"]),
         'lr_outcome': lr_test_preds.tolist(),
@@ -7177,6 +7179,7 @@ def train_test_top_k_model(top_k_concepts_data, top_k_concepts_data_test, Long_C
     nn_scaler = StandardScaler().fit(X_train)
     nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
 
+    print(X_train.shape)
     print(X_test.shape)
     lr_test_preds = lrc.predict_proba(X_test)[:, 1]
     lr_train_preds = lrc.predict_proba(X_train)[:, 1]
