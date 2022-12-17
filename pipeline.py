@@ -345,17 +345,18 @@ def variable_time_collate_fn(tt_ls, val_ls, mask_ls, labels_ls, device=torch.dev
     #     return combined_data
 
 def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setup="both", start_col_id = 5, end_col_id=-1, label_col_name = None):
+    label = label.set_index("person_id")
     if type(person_ids) is list:
         all_person_ids = person_ids
         all_person_ids.sort()
-    else: 
-        all_person_info = all_person_info.set_index("person_id")
-        
-        
-        all_person_ids = list(all_person_info.index.unique())
+    else:         
+        all_person_ids = list(label.index.unique())
         all_person_ids.sort()
+    if all_person_info is not None:
+        all_person_info = all_person_info.set_index("person_id")
+        print(all_person_info)
     recent_visit = recent_visit.set_index(["person_id", "visit_date"])
-    label = label.set_index("person_id")
+    
     print("first 10 person ids::", all_person_ids[0:10])
     # all_person_ids = list(all_person_info.index.unique())
     visit_tensor_ls = []
@@ -396,7 +397,7 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
 
         # Obtain the label
         label_row = label.loc[person_id]
-        print("labe row::", label_row)
+        # print("label row::", label_row)
         if label_col_name is None:
             if setup == "prior":
                 label_tensor = torch.tensor(label_row["pasc_code_prior_four_weeks"])
@@ -407,6 +408,84 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
             else:
                 raise Exception(f"Unknown setup `{setup}`")
         else:
+            # print("label:", label_row[label_col_name])
+            label_tensor = torch.tensor(label_row[label_col_name])
+        label_tensor_ls.append(label_tensor)
+        visit_tensor_ls.append(visits_tensor)
+        mask_ls.append(mask)
+        time_step_ls.append(time_steps)
+        if person_info_ls is not None:
+            person_info_ls.append(person_info_tensor)
+        person_count +=1
+        if person_count %100 == 0:
+            print("person count::", person_count)
+
+    return visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls
+
+def pre_processing_visits2(person_ids, all_person_info, recent_visit, label, setup="both", start_col_id = 5, end_col_id=-1, label_col_name = None):
+    label = label.set_index("person_id")
+    if type(person_ids) is list:
+        all_person_ids = person_ids
+        all_person_ids.sort()
+    else:         
+        all_person_ids = list(label.index.unique())
+        all_person_ids.sort()
+    if all_person_info is not None:
+        all_person_info = all_person_info.set_index("person_id")
+        print(all_person_info)
+    recent_visit = recent_visit.set_index(["person_id", "visit_date"])
+    
+    print("first 10 person ids::", all_person_ids[0:10])
+    # all_person_ids = list(all_person_info.index.unique())
+    visit_tensor_ls = []
+    mask_ls= []
+    time_step_ls=[]
+    if all_person_info is None:
+        person_info_ls = None
+    else:
+        person_info_ls = []
+    label_tensor_ls = []
+    person_count=0
+    for person_id in all_person_ids:
+        if all_person_info is not None:
+            person_info = all_person_info.loc[person_id]
+            # print("person info::", person_info)
+            # print("person info values::", person_info.values.tolist())
+            person_info_tensor = torch.tensor([
+                person_info.values.tolist()[1:-1]
+            ])
+        visits = recent_visit.loc[person_id]
+        visit_tensors = []
+        time_steps = []
+        # print(visits)
+        visits_tensor2 = torch.from_numpy(np.array(visits.iloc[:,start_col_id:end_col_id].values.tolist()))
+        time_steps2 = torch.from_numpy(np.array(visits["diff_days"].values.tolist()))
+        for i in range(len(visits)):
+            visit = visits.iloc[i]
+            # visit_tensor = torch.tensor([visit["diff_date"] / 180] + list(visit[5:]))
+            visit_tensor = list(visit[start_col_id:end_col_id])
+            time_steps.append(visit["diff_days"])
+            visit_tensors.append(torch.tensor(visit_tensor))
+        visits_tensor = torch.stack(visit_tensors)
+
+        mask = (~torch.isnan(visits_tensor)).float()
+
+        time_steps = torch.tensor(time_steps)
+
+        # Obtain the label
+        label_row = label.loc[person_id]
+        # print("label row::", label_row)
+        if label_col_name is None:
+            if setup == "prior":
+                label_tensor = torch.tensor(label_row["pasc_code_prior_four_weeks"])
+            elif setup == "after":
+                label_tensor = torch.tensor(label_row["pasc_code_after_four_weeks"])
+            elif setup == "both":
+                label_tensor = torch.tensor(max(label_row["pasc_code_after_four_weeks"], label_row["pasc_code_prior_four_weeks"]))
+            else:
+                raise Exception(f"Unknown setup `{setup}`")
+        else:
+            # print("label:", label_row[label_col_name])
             label_tensor = torch.tensor(label_row[label_col_name])
         label_tensor_ls.append(label_tensor)
         visit_tensor_ls.append(visits_tensor)
@@ -419,6 +498,7 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
             print("person count::", person_count)
 
     return visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls
+
 # def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setup="both"):
 #     # all_person_ids = person_ids["person_id"].unique()
     
@@ -626,8 +706,9 @@ class LongCOVIDVisitsDataset2(torch.utils.data.Dataset):
         self.data_max = data_max
 
         # self.data_tensor, self.label_tensor = variable_time_collate_fn(time_step_ls, visit_tensor_ls, mask_ls, label_tensor_ls, device=torch.device("cpu"), data_min=data_min, data_max=data_max)
-        assert len(self.label_tensor_ls) == len(self.person_info_ls)
         if self.person_info_ls is not None:
+            assert len(self.label_tensor_ls) == len(self.person_info_ls)
+        
             assert len(self.person_info_ls) == len(self.time_step_ls)
         assert len(self.visit_tensor_ls) == len(self.label_tensor_ls)
 
@@ -657,7 +738,10 @@ class LongCOVIDVisitsDataset2(torch.utils.data.Dataset):
         idx_ls = [item[7] for item in data]
         batched_data_tensor, batched_label_tensor = variable_time_collate_fn(time_step_ls, visit_tensor_ls, mask_ls, label_tensor_ls, device=torch.device("cpu"), data_min=data_min, data_max=data_max)
         # batched_person_=[]
-        batched_person_info = torch.stack(person_info_ls)
+        if person_info_ls is not None:
+            batched_person_info = torch.stack(person_info_ls)
+        else:
+            batched_person_info = None
         idx_ls_tensor = torch.tensor(idx_ls)
         # print("selected_ids::",idx_ls_tensor)
         # batched_data_tensor = torch.stack([item[0] for item in data])
@@ -942,7 +1026,10 @@ def evaluate_classifier(model, test_loader, dec=None, latent_dim=None, classify_
     for item in test_loader:
         test_batch, label, person_info_batch = item
         # train_batch, label, person_info_batch = item
-        test_batch, label, person_info_batch = test_batch.float().to(device), label.to(device), person_info_batch.float().to(device)
+        if person_info_batch is not None:
+            test_batch, label, person_info_batch = test_batch.float().to(device), label.to(device), person_info_batch.float().to(device)
+        else:
+            test_batch, label = test_batch.float().to(device), label.to(device)
         batch_len = test_batch.shape[0]
         observed_data, observed_mask, observed_tp \
             = test_batch[:, :, :dim], test_batch[:, :, dim:2*dim], test_batch[:, :, -1]
@@ -1497,8 +1584,8 @@ def Produce_obs_dataset(add_date_diff_cols):
     # valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
     train_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(train_person_ids))
     valid_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(valid_person_ids))
-    train_labels = train_recent_visits.select(F.col("person_id"), F.col("outcome"))
-    valid_labels = valid_recent_visits.select(F.col("person_id"), F.col("outcome"))
+    train_labels = train_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
+    valid_labels = valid_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
     train_recent_visits = train_recent_visits.drop(F.col("outcome"))
     valid_recent_visits = valid_recent_visits.drop(F.col("outcome"))
     # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
@@ -1537,6 +1624,161 @@ def Produce_obs_dataset(add_date_diff_cols):
     subset_valid_label_tensor_ls = [valid_label_tensor_ls[idx] for idx in valid_subset_ids]    
 
     subset_valid_dataset = LongCOVIDVisitsDataset2(subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max)
+    write_to_pickle([visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max], "train_data")
+    write_to_pickle([valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max], "valid_data")
+    
+    write_to_pickle([subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max], "subset_valid_data")
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.7f4133c1-cccc-4f64-b292-3055c0ade3a0"),
+    add_date_diff_cols=Input(rid="ri.foundry.main.dataset.d3dc0e61-b976-406e-917b-a7e47c925333")
+)
+def Produce_obs_dataset_2(add_date_diff_cols):
+    recent_visits = add_date_diff_cols
+    # def produce_dataset(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
+    print("start")
+
+    write_to_pickle([None, None], "sample_data")
+    # unique_person_ids = obs_latent_sequence.select("person_id").distinct()
+    
+    unique_person_ids = list(recent_visits.select(F.col('person_id')).distinct().toPandas()['person_id'])
+
+    print("unique person ids::", unique_person_ids[0:10])
+
+    random.shuffle(unique_person_ids)
+
+    print("random unique person ids::", unique_person_ids[0:10])
+
+    train_person_ids = unique_person_ids[0:int(len(unique_person_ids)*0.9)]
+    valid_person_ids = unique_person_ids[int(len(unique_person_ids)*0.9):]
+
+    # spark.createDataFrame(data=dept, schema = deptColumns)
+    # write_to_pickle([torch.zeros(10), torch.ones(10)], "sample_data")
+    # # First get the splitted person ids
+    # train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    # valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+    train_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(train_person_ids))
+    valid_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(valid_person_ids))
+    train_labels = train_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
+    valid_labels = valid_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
+    train_recent_visits = train_recent_visits.drop(F.col("outcome"))
+    valid_recent_visits = valid_recent_visits.drop(F.col("outcome"))
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+
+    # train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # print(train_recent_visits.show())
+
+    train_person_info = None#train_person_ids.join(person_information, on="person_id")
+    valid_person_info = None#valid_person_ids.join(person_information, on="person_id")
+
+    print("start pre-processing!!!")
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids, None, train_recent_visits.toPandas(), train_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids, None, valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+    print("finish pre-processing!!!")
+
+    visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+    data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+
+    train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+    valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+
+    valid_subset_ids = list(range(10))
+
+    subset_valid_visit_tensor_ls = [valid_visit_tensor_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_mask_ls = [valid_mask_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_time_step_ls = [valid_time_step_ls[idx] for idx in valid_subset_ids]    
+    if valid_person_info_ls is not None:
+        subset_valid_person_info_ls = [valid_person_info_ls[idx] for idx in valid_subset_ids]    
+    else:
+        subset_valid_person_info_ls = None
+    subset_valid_label_tensor_ls = [valid_label_tensor_ls[idx] for idx in valid_subset_ids]    
+
+    # subset_valid_dataset = LongCOVIDVisitsDataset2(subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max)
+    write_to_pickle([visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max], "train_data")
+    write_to_pickle([valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max], "valid_data")
+    
+    write_to_pickle([subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max], "subset_valid_data")
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.26c31342-fc7f-43b8-a3e5-5b115e528bd4"),
+    add_date_diff_cols=Input(rid="ri.foundry.main.dataset.d3dc0e61-b976-406e-917b-a7e47c925333"),
+    top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
+)
+def Produce_obs_dataset_with_static_feature(add_date_diff_cols, obs_latent):
+    recent_visits = add_date_diff_cols
+    # def produce_dataset(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
+    print("start")
+    # unique_person_ids = obs_latent_sequence.select("person_id").distinct()
+    
+    unique_person_ids = list(recent_visits.select(F.col('person_id')).distinct().toPandas()['person_id'])
+
+    print("unique person ids::", unique_person_ids[0:10])
+
+    random.shuffle(unique_person_ids)
+
+    print("random unique person ids::", unique_person_ids[0:10])
+
+    train_person_ids = unique_person_ids[0:int(len(unique_person_ids)*0.9)]
+    valid_person_ids = unique_person_ids[int(len(unique_person_ids)*0.9):]
+
+    # spark.createDataFrame(data=dept, schema = deptColumns)
+    # write_to_pickle([torch.zeros(10), torch.ones(10)], "sample_data")
+    # # First get the splitted person ids
+    # train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    # valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+    train_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(train_person_ids))
+    valid_recent_visits = recent_visits.filter(recent_visits["person_id"].isin(valid_person_ids))
+    train_labels = train_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
+    valid_labels = valid_recent_visits.select(F.col("person_id"), F.col("outcome")).distinct()
+    train_recent_visits = train_recent_visits.drop(F.col("outcome"))
+    valid_recent_visits = valid_recent_visits.drop(F.col("outcome"))
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+
+    # train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # print(train_recent_visits.show())
+
+    train_person_info = obs_latent.filter(obs_latent["person_id"].isin(train_person_ids))
+    valid_person_info = obs_latent.filter(obs_latent["person_id"].isin(valid_person_ids))
+    # train_person_info = train_person_ids.join(person_information, on="person_id")
+    # valid_person_info = valid_person_ids.join(person_information, on="person_id")
+
+    print("start pre-processing!!!")
+    print(train_person_info)
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits2(train_person_ids, train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits2(valid_person_ids, valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both", start_col_id = 2, end_col_id=-2, label_col_name="outcome")
+    print("finish pre-processing!!!")
+
+    visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+    data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+
+    train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+    valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+
+    valid_subset_ids = list(range(10))
+
+    subset_valid_visit_tensor_ls = [valid_visit_tensor_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_mask_ls = [valid_mask_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_time_step_ls = [valid_time_step_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_person_info_ls = [valid_person_info_ls[idx] for idx in valid_subset_ids]    
+    subset_valid_label_tensor_ls = [valid_label_tensor_ls[idx] for idx in valid_subset_ids]    
+
+    # subset_valid_dataset = LongCOVIDVisitsDataset2(subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max)
     write_to_pickle([visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max], "train_data")
     write_to_pickle([valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max], "valid_data")
     
@@ -5840,6 +6082,360 @@ def train_sequential_model_3_rebalance(train_sequential_model_3, train_valid_spl
     write_to_pickle(rec_state_dict, "mTans_rec_reweight")
     write_to_pickle(dec_state_dict, "mTans_dec_reweight")
     write_to_pickle(classifier_state_dict, "mTans_classifier_reweight")
+    # read_from_pickle()
+    print("save models successfully")
+    # Make predictions on test data
+    # df = testing_data[['median_income', 'housing_median_age', 'total_rooms']]
+    # predictions = my_model.predict(df)
+    # df['predicted_house_values'] = pd.DataFrame(predictions)    
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.1842252f-8cfa-4dac-ae3e-62e629d09151"),
+    Produce_obs_dataset_2=Input(rid="ri.foundry.main.dataset.7f4133c1-cccc-4f64-b292-3055c0ade3a0")
+)
+import pandas as pd
+
+def train_sequential_model_new(Produce_obs_dataset_2):
+
+    print("start")
+    # dim=10
+    # latent_dim=20
+    # rec_hidden=32
+    # learn_emb=True
+    # enc_num_heads=1
+    # num_ref_points=128
+    # gen_hidden=30
+    # dec_num_heads=1
+    # static_input_dim = 10
+    # classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    # device = torch.device(
+    #     'cuda' if torch.cuda.is_available() else 'cpu')
+    # print("device::", device)
+    # rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    # dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    # lr = 0.0005
+
+    # write_to_pickle(rec.state_dict(), "mTans_rec")
+    # write_to_pickle(dec.state_dict(), "mTans_dec")
+    # write_to_pickle(classifier.state_dict(), "mTans_classifier")
+
+    # First get the splitted person ids
+    # train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    # valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+
+    # train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # # print(train_recent_visits.show())
+
+    # train_person_info = train_person_ids.join(person_information, on="person_id")
+    # valid_person_info = valid_person_ids.join(person_information, on="person_id")
+    # # train_person_ids = train_valid_split.loc[train_valid_split["split"] == "train"]
+    # # valid_person_ids = train_valid_split.loc[train_valid_split["split"] == "valid"]
+
+    # # Use it to split the data into training x/y and validation x/y
+    # # train_recent_visits = train_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
+    # # valid_recent_visits = valid_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
+    # # train_labels = train_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+    # # valid_labels = valid_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+
+    # # Basic person information
+    # # train_person_info = train_person_ids.merge(person_information, on="person_id")
+    # # valid_person_info = valid_person_ids.merge(person_information, on="person_id")
+    
+
+    # print("start pre-processing!!!")
+    # visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids.toPandas(), train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both")
+    # # torch.save(visit_tensor_ls, "train_visit_tensor_ls")
+    # # torch.save(mask_ls, "train_mask_ls")
+    # # torch.save(time_step_ls, "train_mask_ls")
+    # # torch.save(label_tensor_ls, "train_label_tensor_ls")
+    # # torch.save(person_info_ls, "train_person_info_ls")
+    
+    # # visit_tensor_ls, mask_ls = remove_empty_columns(visit_tensor_ls, mask_ls)
+
+    # valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids.toPandas(), valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both")
+    # print("finish pre-processing!!!")
+    # visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    # valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+    # data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max = read_from_pickle(Produce_obs_dataset_2, "train_data.pickle")
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, _,_ = read_from_pickle(Produce_obs_dataset_2, "valid_data.pickle")
+    train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+    valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+
+    # write_to_pickle(train_dataset, "train_dataset")
+    # write_to_pickle(valid_dataset, "valid_dataset")
+    # train_dataset = LongCOVIDVisitsDataset2(train_person_ids, train_person_info, train_recent_visits, train_labels)
+    # valid_dataset = LongCOVIDVisitsDataset2(valid_person_ids, valid_person_info, valid_recent_visits, valid_labels)
+
+    # Construct dataloaders
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=4, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+
+    epochs=10
+    print(train_dataset.__getitem__(1)[0])
+    dim = train_dataset.__getitem__(1)[0].shape[-1]
+    # static_input_dim = train_dataset.__getitem__(1)[3].shape[-1]
+    print("data shape::", train_dataset.__getitem__(1)[0].shape)
+    print("mask shape::", train_dataset.__getitem__(1)[1].shape)
+    print("dim::", dim)
+    print(data_min)
+    latent_dim=20
+    rec_hidden=32
+    learn_emb=True
+    enc_num_heads=1
+    num_ref_points=128
+    gen_hidden=30
+    dec_num_heads=1
+    classifier = create_classifier(latent_dim, 20, has_static=False)
+    device = torch.device(
+        'cuda' if torch.cuda.is_available() else 'cpu')
+    print("device::", device)
+    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    lr = 0.0005
+
+    
+
+    rec = rec.to(device)
+    dec = dec.to(device)
+    classifier = classifier.to(device)
+
+    # rec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_rec.pickle'))
+    # dec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_dec.pickle'))
+    # classifier.load_state_dict(read_model_from_pickle(train_sequential_model_3, "mTans_classifier.pickle"))
+    # print("load model successfully")
+    # print("start evaluating model::")
+
+    # val_loss, val_acc, val_auc, val_recall, val_precision, _,_ = evaluate_classifier(rec, train_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+
+    # print("validation performance at epoch::", 0)
+    # print("validation loss::", val_loss)
+    # print("validation accuracy::", val_acc)
+    # print("validation auc score::", val_auc)
+    # print("validation recall::", val_recall)
+    # print("validation precision score::", val_precision)
+
+    # _, _, _, _, _, best_train_true, best_train_pred_labels = evaluate_classifier(rec, train_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+
+    
+
+    # incorrect_labeled_train_ids = torch.from_numpy(np.nonzero(best_train_true.reshape(-1) != best_train_pred_labels.reshape(-1))[0])
+    # print("incorrect_labeled_train_ids::", incorrect_labeled_train_ids)
+    # print("incorrect_labeled_train_ids count::", len(incorrect_labeled_train_ids))
+    # incorrect_sample_weight=2
+
+    # pos_ids = torch.tensor([idx for idx in range(len(train_dataset.label_tensor_ls)) if train_dataset.label_tensor_ls[idx] == 1])
+    # neg_ids = torch.tensor([idx for idx in range(len(train_dataset.label_tensor_ls)) if train_dataset.label_tensor_ls[idx] == 0])
+    # print("positive training count::", len(pos_ids))
+    # print("negative training count::", len(neg_ids))
+
+    # train_set_weight = torch.ones(len(train_dataset))
+    # train_set_weight[pos_ids] = incorrect_sample_weight
+    # train_set_weight = train_set_weight/incorrect_sample_weight
+    # sampler = torch.utils.data.sampler.WeightedRandomSampler(train_set_weight, len(train_set_weight))
+    # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, sampler=sampler, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    # print("start training::")
+
+    # classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    # device = torch.device(
+    #     'cuda' if torch.cuda.is_available() else 'cpu')
+    # print("device::", device)
+    # rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    # dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+
+    # rec = rec.to(device)
+    # dec = dec.to(device)
+    # classifier = classifier.to(device)
+    best_valid_true, best_valid_pred_labels, best_train_true, best_train_pred_labels, rec_state_dict, dec_state_dict, classifier_state_dict = train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
+    device = torch.device('cpu')
+    write_to_pickle(rec_state_dict, "mTans_rec")
+    write_to_pickle(dec_state_dict, "mTans_dec")
+    write_to_pickle(classifier_state_dict, "mTans_classifier")
+    # read_from_pickle()
+    print("save models successfully")
+    # Make predictions on test data
+    # df = testing_data[['median_income', 'housing_median_age', 'total_rooms']]
+    # predictions = my_model.predict(df)
+    # df['predicted_house_values'] = pd.DataFrame(predictions)    
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.44340edf-afab-4e85-b224-9d5cab2fec8d"),
+    Produce_obs_dataset_with_static_feature=Input(rid="ri.foundry.main.dataset.26c31342-fc7f-43b8-a3e5-5b115e528bd4")
+)
+import pandas as pd
+
+def train_sequential_model_new_with_static_feature(Produce_obs_dataset_with_static_feature):
+
+    print("start")
+    # dim=10
+    # latent_dim=20
+    # rec_hidden=32
+    # learn_emb=True
+    # enc_num_heads=1
+    # num_ref_points=128
+    # gen_hidden=30
+    # dec_num_heads=1
+    # static_input_dim = 10
+    # classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    # device = torch.device(
+    #     'cuda' if torch.cuda.is_available() else 'cpu')
+    # print("device::", device)
+    # rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    # dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    # lr = 0.0005
+
+    # write_to_pickle(rec.state_dict(), "mTans_rec")
+    # write_to_pickle(dec.state_dict(), "mTans_dec")
+    # write_to_pickle(classifier.state_dict(), "mTans_classifier")
+
+
+    # First get the splitted person ids
+    # train_person_ids = train_valid_split.where(train_valid_split["split"] == "train")
+    # valid_person_ids = train_valid_split.where(train_valid_split["split"] == "valid")
+
+    # train_recent_visits = train_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # valid_recent_visits = valid_person_ids.join(recent_visits_w_nlp_notes_2, on="person_id")
+    # train_labels = train_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # valid_labels = valid_person_ids.join(Long_COVID_Silver_Standard, on="person_id")
+    # # print(train_recent_visits.show())
+
+    # train_person_info = train_person_ids.join(person_information, on="person_id")
+    # valid_person_info = valid_person_ids.join(person_information, on="person_id")
+    # # train_person_ids = train_valid_split.loc[train_valid_split["split"] == "train"]
+    # # valid_person_ids = train_valid_split.loc[train_valid_split["split"] == "valid"]
+
+    # # Use it to split the data into training x/y and validation x/y
+    # # train_recent_visits = train_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
+    # # valid_recent_visits = valid_person_ids.merge(recent_visits_w_nlp_notes_2, on="person_id")
+    # # train_labels = train_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+    # # valid_labels = valid_person_ids.merge(Long_COVID_Silver_Standard, on="person_id")
+
+    # # Basic person information
+    # # train_person_info = train_person_ids.merge(person_information, on="person_id")
+    # # valid_person_info = valid_person_ids.merge(person_information, on="person_id")
+    
+
+    # print("start pre-processing!!!")
+    # visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids.toPandas(), train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both")
+    # # torch.save(visit_tensor_ls, "train_visit_tensor_ls")
+    # # torch.save(mask_ls, "train_mask_ls")
+    # # torch.save(time_step_ls, "train_mask_ls")
+    # # torch.save(label_tensor_ls, "train_label_tensor_ls")
+    # # torch.save(person_info_ls, "train_person_info_ls")
+    
+    # # visit_tensor_ls, mask_ls = remove_empty_columns(visit_tensor_ls, mask_ls)
+
+    # valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids.toPandas(), valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both")
+    # print("finish pre-processing!!!")
+    # visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    # valid_visit_tensor_ls, valid_mask_ls = remove_empty_columns_with_non_empty_cls(valid_visit_tensor_ls, valid_mask_ls, non_empty_column_ids)
+
+    # data_min, data_max = get_data_min_max(visit_tensor_ls, mask_ls)
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max = read_from_pickle(Produce_obs_dataset_2, "train_data.pickle")
+    valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, _,_ = read_from_pickle(Produce_obs_dataset_2, "valid_data.pickle")
+    train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max)
+
+    valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max)
+
+    # write_to_pickle(train_dataset, "train_dataset")
+    # write_to_pickle(valid_dataset, "valid_dataset")
+    # train_dataset = LongCOVIDVisitsDataset2(train_person_ids, train_person_info, train_recent_visits, train_labels)
+    # valid_dataset = LongCOVIDVisitsDataset2(valid_person_ids, valid_person_info, valid_recent_visits, valid_labels)
+
+    # Construct dataloaders
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=4, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+
+    epochs=10
+    print(train_dataset.__getitem__(1)[0])
+    dim = train_dataset.__getitem__(1)[0].shape[-1]
+    # static_input_dim = train_dataset.__getitem__(1)[3].shape[-1]
+    print("data shape::", train_dataset.__getitem__(1)[0].shape)
+    print("mask shape::", train_dataset.__getitem__(1)[1].shape)
+    print("dim::", dim)
+    print(data_min)
+    latent_dim=20
+    rec_hidden=32
+    learn_emb=True
+    enc_num_heads=1
+    num_ref_points=128
+    gen_hidden=30
+    dec_num_heads=1
+    classifier = create_classifier(latent_dim, 20, has_static=False)
+    device = torch.device(
+        'cuda' if torch.cuda.is_available() else 'cpu')
+    print("device::", device)
+    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    lr = 0.0005
+
+    
+
+    rec = rec.to(device)
+    dec = dec.to(device)
+    classifier = classifier.to(device)
+
+
+    # rec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_rec.pickle'))
+    # dec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_dec.pickle'))
+    # classifier.load_state_dict(read_model_from_pickle(train_sequential_model_3, "mTans_classifier.pickle"))
+    # print("load model successfully")
+    # print("start evaluating model::")
+
+    # val_loss, val_acc, val_auc, val_recall, val_precision, _,_ = evaluate_classifier(rec, train_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+
+    # print("validation performance at epoch::", 0)
+    # print("validation loss::", val_loss)
+    # print("validation accuracy::", val_acc)
+    # print("validation auc score::", val_auc)
+    # print("validation recall::", val_recall)
+    # print("validation precision score::", val_precision)
+
+
+
+    # _, _, _, _, _, best_train_true, best_train_pred_labels = evaluate_classifier(rec, train_loader, latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+
+    
+
+    # incorrect_labeled_train_ids = torch.from_numpy(np.nonzero(best_train_true.reshape(-1) != best_train_pred_labels.reshape(-1))[0])
+    # print("incorrect_labeled_train_ids::", incorrect_labeled_train_ids)
+    # print("incorrect_labeled_train_ids count::", len(incorrect_labeled_train_ids))
+    # incorrect_sample_weight=2
+
+    # pos_ids = torch.tensor([idx for idx in range(len(train_dataset.label_tensor_ls)) if train_dataset.label_tensor_ls[idx] == 1])
+    # neg_ids = torch.tensor([idx for idx in range(len(train_dataset.label_tensor_ls)) if train_dataset.label_tensor_ls[idx] == 0])
+    # print("positive training count::", len(pos_ids))
+    # print("negative training count::", len(neg_ids))
+
+
+    # train_set_weight = torch.ones(len(train_dataset))
+    # train_set_weight[pos_ids] = incorrect_sample_weight
+    # train_set_weight = train_set_weight/incorrect_sample_weight
+    # sampler = torch.utils.data.sampler.WeightedRandomSampler(train_set_weight, len(train_set_weight))
+    # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, sampler=sampler, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    # print("start training::")
+
+
+    # classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    # device = torch.device(
+    #     'cuda' if torch.cuda.is_available() else 'cpu')
+    # print("device::", device)
+    # rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    # dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+
+    # rec = rec.to(device)
+    # dec = dec.to(device)
+    # classifier = classifier.to(device)
+    best_valid_true, best_valid_pred_labels, best_train_true, best_train_pred_labels, rec_state_dict, dec_state_dict, classifier_state_dict = train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
+    device = torch.device('cpu')
+    write_to_pickle(rec_state_dict, "mTans_rec")
+    write_to_pickle(dec_state_dict, "mTans_dec")
+    write_to_pickle(classifier_state_dict, "mTans_classifier")
     # read_from_pickle()
     print("save models successfully")
     # Make predictions on test data
