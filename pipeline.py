@@ -18,7 +18,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import classification_report
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import RepeatedKFold
-from sklearn.feature_selection import VarianceThreshold
+from sklearn.feature_selection import VarianceThreshold, SelectKBest
 import numpy as np
 from matplotlib import pyplot as plt
 import time
@@ -47,7 +47,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import math
-# import shap
+import shap
 
 import scipy.stats
 
@@ -8081,6 +8081,91 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     return predictions
 
 @transform_pandas(
+    Output(rid="ri.vector.main.execute.4bcf67c2-4fa9-43cc-b6dd-eb9ae2b8c1d2"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
+    all_patients_summary_fact_table_de_id_testing=Input(rid="ri.foundry.main.dataset.4b4d2bc0-b43f-4d63-abc6-ed115f0cd117")
+)
+def train_test_model_shap(all_patients_summary_fact_table_de_id, all_patients_summary_fact_table_de_id_testing, Long_COVID_Silver_Standard):
+    
+    static_cols = ['person_id','total_visits', 'age']
+
+    cols = static_cols + [col for col in all_patients_summary_fact_table_de_id.columns if 'indicator' in col]
+    
+    ## get outcome column
+    Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
+    Outcome_df = all_patients_summary_fact_table_de_id[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
+    Outcome_df = Outcome_df[["person_id", "outcome"]].sort_values('person_id')
+
+    Outcome = list(Outcome_df["outcome"])
+
+    for col in all_patients_summary_fact_table_de_id.columns:
+        if col not in all_patients_summary_fact_table_de_id_testing.columns:
+            print(col, " not in summary testing set.")
+            all_patients_summary_fact_table_de_id_testing[col] = 0
+    for col in all_patients_summary_fact_table_de_id_testing.columns:
+        if col not in all_patients_summary_fact_table_de_id.columns:
+            print(col, " not in summary training set.")
+            all_patients_summary_fact_table_de_id_testing.drop(col, axis=1)
+
+    Training_and_Holdout = all_patients_summary_fact_table_de_id[cols].fillna(0.0).sort_values('person_id')
+    Training_and_Holdout = Training_and_Holdout.sort_index(axis=1)
+    Testing = all_patients_summary_fact_table_de_id_testing[cols].fillna(0.0).sort_values('person_id')
+    Testing = Testing.sort_index(axis=1)
+    
+    if LOAD_TEST == 0:
+        X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+    else:
+        X_train_no_ind, y_train = Training_and_Holdout, Outcome
+        X_test_no_ind, y_test = Testing, None
+    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+
+    lrc_params = {'C': 1, 'class_weight': None, 'dual': False, 'fit_intercept': True, 'intercept_scaling': 1, 'l1_ratio': None, 'max_iter': 100, 'multi_class': 'auto', 'n_jobs': None, 'penalty': 'l2', 'random_state': None, 'solver': 'liblinear', 'tol': 0.0001, 'verbose': 0, 'warm_start': False}
+    lrc2_params = {'C': 1, 'class_weight': 'balanced', 'dual': False, 'fit_intercept': True, 'intercept_scaling': 1, 'l1_ratio': None, 'max_iter': 500, 'multi_class': 'auto', 'n_jobs': None, 'penalty': 'l2', 'random_state': None, 'solver': 'liblinear', 'tol': 0.0001, 'verbose': 0, 'warm_start': False}
+    rfc_params = {'bootstrap': False, 'ccp_alpha': 0.0, 'class_weight': None, 'criterion': 'gini', 'max_depth': None, 'max_features': 'auto', 'max_leaf_nodes': None, 'max_samples': None, 'min_impurity_decrease': 0.0, 'min_impurity_split': None, 'min_samples_leaf': 1, 'min_samples_split': 2, 'min_weight_fraction_leaf': 0.0, 'n_estimators': 400, 'n_jobs': -1, 'oob_score': False, 'random_state': None, 'verbose': 0, 'warm_start': False}
+    gbc_params = {'ccp_alpha': 0.0, 'criterion': 'friedman_mse', 'init': None, 'learning_rate': 0.075, 'loss': 'exponential', 'max_depth': 12, 'max_features': 'log2', 'max_leaf_nodes': None, 'min_impurity_decrease': 0.0, 'min_impurity_split': None, 'min_samples_leaf': 1, 'min_samples_split': 0.001, 'min_weight_fraction_leaf': 0.0, 'n_estimators': 500, 'n_iter_no_change': None, 'random_state': None, 'subsample': 0.618, 'tol': 0.0001, 'validation_fraction': 0.1, 'verbose': 0, 'warm_start': False}
+
+    lrc = LogisticRegression(**lrc_params).fit(X_train, y_train)
+    lrc2 = LogisticRegression(**lrc2_params).fit(X_train, y_train)
+    rfc = RandomForestClassifier(**rfc_params).fit(X_train, y_train)
+    gbc = GradientBoostingClassifier(**gbc_params).fit(X_train, y_train)
+
+    ens_fn = lambda x: (lrc.predict_proba(x) + lrc2.predict_proba(x) + rfc.predict_proba(x) + gbc.predict_proba(x))[:, 1] / 4
+
+    X_train_sample = shap.kmeans(X_train, 20)
+    X_test_sample = X_test.head(100)
+
+    preds = ens_fn(X_test.head(100)) > 0.5
+    for i, pred in enumerate(preds):
+        if pred and Outcome[i] == 1:
+            print(i)
+
+    print("Starting shap calculations")
+    explainer = shap.KernelExplainer(ens_fn, X_train_sample)
+    shap_values = explainer.shap_values(X_test_sample)
+
+    # Issues with the Enclave don't allow us to save the data, so we perform the visualizations in the same node.
+    plt.figure(figsize=(40,40))
+    plt.subplot(1,2,1)
+    shap.plots._waterfall.waterfall_legacy(explainer.expected_value, shap_values[38], X_test_sample.iloc[38], feature_names=X_test_sample.columns, show=False)
+
+    plt.subplot(1,2,2)
+    shap.plots._waterfall.waterfall_legacy(explainer.expected_value, shap_values[0], X_test_sample.iloc[0], feature_names=X_test_sample.columns, show=False)
+
+    # plt.subplot(3,1,3)
+    # shap.summary_plot(shap_values, X_test_sample.values, feature_names=X_test_sample.columns, show=False)
+
+    # plt.subplot(4,1,4)
+    # shap.plots._bar.bar_legacy(shap_values, feature_names=X_test_sample.columns, show=False)
+
+    plt.tight_layout()
+    plt.show()
+    
+    # write_to_pickle(explainer.expected_value, "ens_explainer_ev")
+    # write_to_pickle(shap_values, "ens_shap_values")
+    print("Finished ens shap")
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.d7140ada-9148-4d0a-956c-adab7b0af033"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
     all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6"),
@@ -8528,6 +8613,8 @@ def train_test_top_k_model(top_k_concepts_data, top_k_concepts_data_test, Long_C
     lrc2 = LogisticRegression(penalty='l2', solver='liblinear', random_state=1, max_iter=500, class_weight='balanced').fit(X_train, y_train)
     rfc = RandomForestClassifier(random_state=1).fit(X_train, y_train)
     gbc = GradientBoostingClassifier(random_state=1).fit(X_train, y_train)
+    nn_scaler = StandardScaler().fit(X_train)
+    nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
 
     lrc_sort_features = np.argsort(lrc.coef_.flatten())[-21:-1]
     lrc_sort_features_least = np.argsort(lrc.coef_.flatten())[:20]
@@ -8566,8 +8653,6 @@ def train_test_top_k_model(top_k_concepts_data, top_k_concepts_data_test, Long_C
     print("lrc least important features:", [cols[1:][int(i)] for i in lrc_sort_features_least ])
     print("rfc least important features:", [cols[1:][int(i)] for i in rfc_sort_features_least ])
     print("combined least important features:", [cols[1:][int(i)] for i in rfc_sort_features_least if i in lrc_sort_features_least])
-    nn_scaler = StandardScaler().fit(X_train)
-    nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
 
     print(X_train.shape)
     print(X_test.shape)
@@ -8594,6 +8679,80 @@ def train_test_top_k_model(top_k_concepts_data, top_k_concepts_data_test, Long_C
     predictions['tk_ens_outcome'] = predictions.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
 
     return predictions
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.67b2b111-72ba-4b82-a7ce-e4d72f6b05af"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58"),
+    top_k_concepts_data_test=Input(rid="ri.foundry.main.dataset.10a82ffa-f748-4e12-9c88-0f8fc74dcd7f")
+)
+def train_test_top_k_model_shap(top_k_concepts_data, top_k_concepts_data_test, Long_COVID_Silver_Standard):
+    ## get outcome column
+    print("starting")
+    cols = top_k_concepts_data.columns
+
+    # Long_COVID_Silver_Standard = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(F.col("pasc_code_after_four_weeks"), F.col("pasc_code_prior_four_weeks")))
+    # outcome_df = top_k_concepts_data.select("person_id").join(Long_COVID_Silver_Standard, "person_id", "left")
+    # outcome_df = outcome_df.select("person_id", "outcome").orderBy('person_id')
+    # Outcome = list(outcome_df.select("outcome").toPandas()['outcome'])
+
+    # shared_train_test_features = [col for col in top_k_concepts_data.columns if col in top_k_concepts_data_test.columns]
+    # top_k_concepts_data_test = top_k_concepts_data_test.select(shared_train_test_features)
+
+    Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
+    Outcome_df = top_k_concepts_data[["person_id"]].merge(Long_COVID_Silver_Standard, on="person_id", how="left")
+    Outcome_df = Outcome_df[["person_id", "outcome"]].sort_values('person_id')
+    Outcome = list(Outcome_df["outcome"])
+
+    for col in top_k_concepts_data.columns:
+        if col not in top_k_concepts_data_test.columns:
+            print(col, " not in summary testing set.")
+            top_k_concepts_data_test[col] = 0
+    for col in top_k_concepts_data_test.columns:
+        if col not in top_k_concepts_data.columns:
+            print(col, " not in summary training set.")
+            top_k_concepts_data_test.drop(col, axis=1)
+    
+    Training_and_Holdout = top_k_concepts_data.fillna(0.0).sort_values('person_id')
+    Training_and_Holdout = Training_and_Holdout.sort_index(axis=1)
+    Testing = top_k_concepts_data_test.fillna(0.0).sort_values('person_id')
+    Testing = Testing.sort_index(axis=1)
+    if LOAD_TEST == 0:
+        X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+    else:
+        X_train_no_ind, y_train = Training_and_Holdout, Outcome
+        X_test_no_ind, y_test = Testing, None
+    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
+
+    print("Training LRC...")
+    lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=1, max_iter=500).fit(X_train, y_train)
+    print("Training LRC2...")
+    lrc2 = LogisticRegression(penalty='l2', solver='liblinear', random_state=1, max_iter=500, class_weight='balanced').fit(X_train, y_train)
+    print("Training RFC...")
+    rfc = RandomForestClassifier(random_state=1).fit(X_train, y_train)
+    print("Training GBC...")
+    gbc = GradientBoostingClassifier(random_state=1).fit(X_train, y_train)
+    # print("Training NN...")
+    # nn_scaler = StandardScaler().fit(X_train)
+    # nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
+
+    ens_fn = lambda x: (lrc.predict_proba(x) + lrc2.predict_proba(x) + rfc.predict_proba(x) + gbc.predict_proba(x))[:, 1] / 4
+
+    X_test_sample = X_test.head(10)
+
+    print("Starting shap calculations")
+    explainer = shap.KernelExplainer(ens_fn, shap.kmeans(X_train, 50))
+    shap_values = explainer.shap_values(X_test_sample)
+
+    # Issues with the Enclave don't allow us to save the data, so we perform the visualizations in the same node.
+    # shap.plots._waterfall.waterfall_legacy(explainer.expected_value, shap_values[0], X_test_sample.iloc[0], feature_names=cols[1:], show=False)
+    shap.summary_plot(shap_values, X_test_sample.values, feature_names=X_test_sample.columns, show=False)
+    plt.tight_layout()
+    plt.show()
+    
+    # write_to_pickle(explainer.expected_value, "ens_explainer_ev")
+    # write_to_pickle(shap_values, "ens_shap_values")
+    print("Finished ens shap")
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.9d1a79f6-7627-4ee4-abc0-d6d6179c2f26"),
