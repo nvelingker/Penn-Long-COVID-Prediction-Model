@@ -6148,51 +6148,6 @@ def top_k_concepts_data_test(device_exposure_testing_copy, procedure_occurrence_
     
 
 @transform_pandas(
-    Output(rid="ri.foundry.main.dataset.0d79b493-848a-4b79-bcb3-923bf5a3b366"),
-    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
-    top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
-)
-def topkconcepts(top_k_concepts_data, Long_COVID_Silver_Standard):
-    Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda r: max(r.pasc_code_after_four_weeks,r.pasc_code_prior_four_weeks), axis=1)
-    Long_COVID_Silver_Standard = Long_COVID_Silver_Standard[["person_id","outcome"]]
-    top_k_concepts_data = top_k_concepts_data.merge(Long_COVID_Silver_Standard, how="left", on="person_id")
-    X = top_k_concepts_data.drop("outcome", axis=1)
-    y = top_k_concepts_data.loc[:,"outcome"]
-
-    X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(X, y, train_size=0.9, random_state=1)
-    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
-    
-    lrc = LogisticRegression(penalty='l2', solver='liblinear', random_state=1, max_iter=500).fit(X_train, y_train)
-    lrc2 = LogisticRegression(penalty='l2', solver='liblinear', random_state=1, max_iter=500, class_weight = 'balanced').fit(X_train, y_train)
-    rfc = RandomForestClassifier(random_state=1).fit(X_train, y_train)
-    gbc = GradientBoostingClassifier(random_state=1,).fit(X_train, y_train)
-
-    lr_test_preds = lrc.predict_proba(X_test)[:, 1]
-    lr2_test_preds = lrc2.predict_proba(X_test)[:, 1]
-    rf_test_preds = rfc.predict_proba(X_test)[:, 1]
-    gb_test_preds = gbc.predict_proba(X_test)[:, 1]
-
-    df = pd.DataFrame.from_dict({
-        'person_id': list(X_test_no_ind["person_id"]),
-        'lr_outcome': lr_test_preds.tolist(),
-        'lr2_outcome': lr2_test_preds.tolist(),
-        'rf_outcome': rf_test_preds.tolist(),
-        'gb_outcome': gb_test_preds.tolist(),
-        'outcome': y_test
-    }, orient='columns')
-
-    print("LR Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["lr_outcome"] > 0.5, 1, 0))))
-    print("LR2 Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["lr2_outcome"] > 0.5, 1, 0))))
-    print("RF Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["rf_outcome"] > 0.5, 1, 0))))
-    print("GB Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["gb_outcome"] > 0.5, 1, 0))))
-    outcomes = ['lr_outcome', 'rf_outcome', 'gb_outcome']
-    df['ens_outcome'] = df.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
-    print("ENS Classification Report:\n{}".format(classification_report(df["outcome"], np.where(df["ens_outcome"] > 0.5, 1, 0))))
-    return df
-    
-    
-
-@transform_pandas(
     Output(rid="ri.foundry.main.dataset.e870e250-353c-4263-add9-98ce1858f0c6"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
     person_information=Input(rid="ri.foundry.main.dataset.2f6ebf73-3a2d-43dc-ace9-da56da4b1743"),
