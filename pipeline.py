@@ -8905,12 +8905,12 @@ def valid_mTan(train_sequential_model_3, produce_dataset):
 )
 def validation_metrics( train_test_model, train_test_top_k_model, valid_mTan):
     train_test_top_k_model = train_test_top_k_model.drop("outcome", axis=1)
-    df = train_test_model.merge(train_test_top_k_model, on="person_id", how="left").merge(valid_mTan, on="person_id", how="left")
+    df = train_test_model.merge(train_test_top_k_model, on="person_id", how="left")#.merge(valid_mTan, on="person_id", how="left")
 
     outcomes = [i for i in df.columns if i.endswith("_outcome") and not "ens" in i and not "nn" in i]
     print(outcomes)
     df['all_ens_outcome'] = df.apply(lambda row: sum([row[c] for c in outcomes])/len(outcomes), axis=1)
-    df['all_ens_outcome'] = df.apply(lambda row: (row["mTans_outcome"] + row["all_ens_outcome"])/2, axis=1)
+    #df['all_ens_outcome'] = df.apply(lambda row: (row["mTans_outcome"] + row["all_ens_outcome"])/2, axis=1)
     for i in [i for i in df.columns if i != "person_id"]:
         print("{} Classification Report:\n{}".format(i, classification_report(df["outcome"], np.where(df[i] > 0.5, 1, 0))))
         print(i, " MAE:", mean_absolute_error(df['outcome'], np.where(df[i] > 0.5, 1, 0)))
