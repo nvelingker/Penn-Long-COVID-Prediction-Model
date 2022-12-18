@@ -1826,13 +1826,6 @@ def obtain_latent_sequence(observation, condition_occurrence, drug_exposure, pro
     return data
 
 @transform_pandas(
-    Output(rid="ri.foundry.main.dataset.a0c6118a-62cf-4a55-a8f7-b71205db55a2"),
-    validation_metrics=Input(rid="ri.foundry.main.dataset.def6f994-533b-46b8-95ab-3708d867119c")
-)
-def Penn_predictions(validation_metrics):
-     return validation_metrics.select(F.col("person_id"), F.col("all_ens_outcome").alias("prediction"))
-
-@transform_pandas(
     Output(rid="ri.foundry.main.dataset.8a16f982-ef2a-47bf-9cf9-5630e535e8b7"),
     add_date_diff_cols=Input(rid="ri.foundry.main.dataset.d3dc0e61-b976-406e-917b-a7e47c925333")
 )
@@ -5883,6 +5876,13 @@ def observation_table_analysis_1(observation, Long_COVID_Silver_Standard):
 )
 def observation_testing_copy(observation_testing, observation):
     return observation_testing if LOAD_TEST == 1 else observation
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.a0c6118a-62cf-4a55-a8f7-b71205db55a2"),
+    validation_metrics=Input(rid="ri.foundry.main.dataset.def6f994-533b-46b8-95ab-3708d867119c")
+)
+def penn_predictions(validation_metrics):
+     return validation_metrics.select(F.col("person_id"), F.col("all_ens_outcome").alias("prediction"))
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.2f6ebf73-3a2d-43dc-ace9-da56da4b1743"),
