@@ -7942,7 +7942,7 @@ def train_test_top_k_model(top_k_concepts_data, top_k_concepts_data_test, Long_C
     gbc_sort_features_least = np.argsort(gbc.feature_importances_.flatten())[:20]
 
     fig, axs = plt.subplots(2,2, constrained_layout=True, figsize=(8,8))
-    fig.suptitle('Twenty Most Important Features Per Model')
+    fig.suptitle('Twenty Most Important Features Per Model (Automated)')
     axs[0][0].bar(x = np.arange(20), height = rfc.feature_importances_.flatten()[rfc_sort_features], tick_label=[cols[1:][i] for i in rfc_sort_features])
     axs[0][0].set_xticklabels(labels=[cols[1:][i] for i in rfc_sort_features], fontdict={'rotation':"vertical",'size':'xx-small'})
     axs[0][0].set_ylabel("Purity-based Importance", size='small')
