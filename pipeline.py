@@ -42,7 +42,7 @@ from sklearn.decomposition import PCA
 #load train or test to test copies
 LOAD_TEST = 1
 #turn merge_label to 0 before submission
-MERGE_LABEL = 1
+MERGE_LABEL = 0
 import torch
 import torch.nn as nn
 import numpy as np
