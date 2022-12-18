@@ -8907,7 +8907,7 @@ def validation_metrics( train_test_model, train_test_top_k_model, valid_mTan):
     train_test_top_k_model = train_test_top_k_model.drop("outcome", axis=1)
     df = train_test_model.merge(train_test_top_k_model, on="person_id", how="left").merge(valid_mTan, on="person_id", how="left")
 
-    outcomes = [i for i in df.columns if i.endswith("_outcome") and not "ens" in i and not "nn" in i and not "mTan" in i]
+    outcomes = [i for i in df.columns if i.endswith("_outcome") and not "ens" in i and not "nn" in i]
     print(outcomes)
     df['all_ens_outcome'] = df.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
     df['all_ens_outcome'] = df.apply(lambda row: (row["mTans_outcome"] + row["all_ens_outcome"])/2, axis=1)
