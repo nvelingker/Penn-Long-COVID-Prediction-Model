@@ -6760,6 +6760,8 @@ def test_mTan(train_sequential_model_3, produce_dataset_testing):
 
     test_dataset = LongCOVIDVisitsDataset2(test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, None, data_min, data_max)
 
+    static_input_dim = test_dataset.__getitem__(1)[3].shape[-1]
+
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=4, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
     dim = test_dataset.__getitem__(1)[0].shape[-1]
     latent_dim=20
