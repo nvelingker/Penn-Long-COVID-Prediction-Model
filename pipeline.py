@@ -40,9 +40,9 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import classification_report,roc_auc_score,recall_score, precision_score, brier_score_loss, average_precision_score, mean_absolute_error
 from sklearn.decomposition import PCA
 #load train or test to test copies
-LOAD_TEST = 0
+LOAD_TEST = 1
 #turn merge_label to 0 before submission
-MERGE_LABEL = 1
+MERGE_LABEL = 0
 import torch
 import torch.nn as nn
 import numpy as np
