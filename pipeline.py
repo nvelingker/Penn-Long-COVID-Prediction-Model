@@ -8844,6 +8844,13 @@ def train_valid_split( Long_COVID_Silver_Standard, num_recent_visits):
     return split_person_ids_df
 
 @transform_pandas(
+    Output(rid="ri.vector.main.execute.504db0bb-74b0-4ab8-addd-d2787cb6e555"),
+    validation_metrics=Input(rid="ri.foundry.main.dataset.def6f994-533b-46b8-95ab-3708d867119c")
+)
+def unnamed(validation_metrics):
+    
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.78717ca8-ae81-4a08-8df8-d3ec16e75f18"),
     produce_dataset=Input(rid="ri.foundry.main.dataset.ae1c108c-1813-47ba-831c-e5a37c599c49"),
     train_sequential_model_3=Input(rid="ri.foundry.main.dataset.4fa4a34a-a9e7-489f-a499-023c2d4c44ac")
