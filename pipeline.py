@@ -8999,13 +8999,14 @@ def validation_metrics( train_test_model, train_test_top_k_model, valid_mTan, te
     print(outcomes)
     df['all_ens_outcome'] = df.apply(lambda row: sum([row[c] for c in outcomes])/len(outcomes), axis=1)
     df['all_ens_outcome'] = df.apply(lambda row: (row["mTans_outcome"] + row["all_ens_outcome"])/2, axis=1)
-    for i in [i for i in df.columns if i != "person_id"]:
-        print("{} Classification Report:\n{}".format(i, classification_report(df["outcome"], np.where(df[i] > 0.5, 1, 0))))
-        print(i, " MAE:", mean_absolute_error(df['outcome'], np.where(df[i] > 0.5, 1, 0)))
-        print(i, " Brier score:", brier_score_loss(df['outcome'], df[i]))
-        print(i, " AP:", average_precision_score(df['outcome'], df[i]))
-        print(i, " ROC AUC:", roc_auc_score(df['outcome'], df[i]))
-        print("-"*10)
+    if not LOAD_TEST:
+        for i in [i for i in df.columns if i != "person_id"]:
+            print("{} Classification Report:\n{}".format(i, classification_report(df["outcome"], np.where(df[i] > 0.5, 1, 0))))
+            print(i, " MAE:", mean_absolute_error(df['outcome'], np.where(df[i] > 0.5, 1, 0)))
+            print(i, " Brier score:", brier_score_loss(df['outcome'], df[i]))
+            print(i, " AP:", average_precision_score(df['outcome'], df[i]))
+            print(i, " ROC AUC:", roc_auc_score(df['outcome'], df[i]))
+            print("-"*10)
 
     return df
 
