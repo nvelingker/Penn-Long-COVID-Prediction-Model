@@ -7891,7 +7891,8 @@ def train_test_top_k_model(top_k_concepts_data, top_k_concepts_data_test, Long_C
     Testing = top_k_concepts_data_test.fillna(0.0).sort_values('person_id')
     Testing = Testing.sort_index(axis=1)
     if LOAD_TEST == 0:
-        X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+        X_train_no_ind, _, y_train, y_test = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
+        _, X_test_no_ind, _, _ = train_test_split(Training_and_Holdout, Outcome, train_size=0.9, random_state=1)
     else:
         X_train_no_ind, y_train = Training_and_Holdout, Outcome
         X_test_no_ind, y_test = Testing, None
