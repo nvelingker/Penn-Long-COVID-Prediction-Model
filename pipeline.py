@@ -2528,7 +2528,6 @@ def all_patients_summary_fact_table_de_id_testing(all_patients_visit_day_facts_t
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.ace57213-685a-4f18-a157-2b02b41086be"),
-    Person_top_nlp_symptom=Input(rid="ri.foundry.main.dataset.74827f05-58fb-4281-aed4-4da6f728b448"),
     everyone_conditions_of_interest=Input(rid="ri.foundry.main.dataset.514f3fe8-7565-4701-8982-174b43937006"),
     everyone_devices_of_interest=Input(rid="ri.foundry.main.dataset.15ddf371-0d59-4397-9bee-866c880620cf"),
     everyone_drugs_of_interest=Input(rid="ri.foundry.main.dataset.32bad30b-9322-4e6d-8a88-ab5133e98543"),
@@ -2536,14 +2535,15 @@ def all_patients_summary_fact_table_de_id_testing(all_patients_visit_day_facts_t
     everyone_observations_of_interest=Input(rid="ri.foundry.main.dataset.d2eefa83-105e-404c-9e21-5475e1e1110c"),
     everyone_procedures_of_interest=Input(rid="ri.foundry.main.dataset.ff38921a-cc27-4c35-9a09-9a7ccced1ad6"),
     everyone_vaccines_of_interest=Input(rid="ri.foundry.main.dataset.202ec093-e569-4af8-897a-ab8d2c4325c0"),
-    microvisits_to_macrovisits=Input(rid="ri.foundry.main.dataset.d77a701f-34df-48a1-a71c-b28112a07ffa")
+    microvisits_to_macrovisits=Input(rid="ri.foundry.main.dataset.d77a701f-34df-48a1-a71c-b28112a07ffa"),
+    person_top_nlp_symptom=Input(rid="ri.foundry.main.dataset.73f9d829-203f-4e2d-88d2-0d168503b0b1")
 )
 #Purpose - The purpose of this pipeline is to produce a visit day level and a persons level fact table for all patients in the N3C enclave.
 #Creator/Owner/contact - Andrea Zhou
 #Last Update - 7/8/22
 #Description - All facts collected in the previous steps are combined in this cohort_all_facts_table on the basis of unique visit days for each patient. Indicators are created for the presence or absence of events, medications, conditions, measurements, device exposures, observations, procedures, and outcomes.  It also creates an indicator for whether the visit date where a fact was noted occurred during any hospitalization. This table is useful if the analyst needs to use actual dates of events as it provides more detail than the final patient-level table.  Use the max and min functions to find the first and last occurrences of any events.
 
-def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, everyone_measurements_of_interest, everyone_procedures_of_interest, everyone_observations_of_interest, everyone_drugs_of_interest, everyone_devices_of_interest, microvisits_to_macrovisits, everyone_vaccines_of_interest, Person_top_nlp_symptom):
+def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, everyone_measurements_of_interest, everyone_procedures_of_interest, everyone_observations_of_interest, everyone_drugs_of_interest, everyone_devices_of_interest, microvisits_to_macrovisits, everyone_vaccines_of_interest, person_top_nlp_symptom):
 
     macrovisits_df = microvisits_to_macrovisits
     vaccines_df = everyone_vaccines_of_interest
@@ -2672,6 +2672,14 @@ def all_patients_visit_day_facts_table_de_id_testing(everyone_conditions_of_inte
 #################################################
 ## Global imports and functions included below ##
 #################################################
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.ce8c17fb-63cd-41bd-b9c8-9bf54e5091da")
+)
+from pyspark.sql.types import *
+def broad_related_concepts():
+    schema = StructType([StructField("codeset_id", StringType(), True), StructField("concept_set_name", StringType(), True)])
+    return spark.createDataFrame([["907542870","cough-broad"],["858501962","menstrual-cycle-broad"],["964465007","anxiety-broad"],["409823731","diabetes-broad"],["281429838","fatigue-broad"],["872295997","malaise-broad"],["934501626","fever-broad"],["963124232","dyspnea-broad"],["312841058","chest-pain-broad"],["452556220","palpitations-broad"],["233877953","brain-fog-broad"],["279146925","headache-broad"],["888708919","insomnia-broad"],["663952776","lightheadedness-broad"],["612580291","tingling-broad"],["185979799","anosmia-broad"],["528085678","depression-broad"],["345394441","diarrhea-broad"],["343711928","stomach-pain-broad"],["227682624","joint-muscle-pain-broad"],["534110802","rash-broad"]], schema=schema)
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.9b4ab5dd-d57f-416e-a2ee-75611c8a12bc"),
@@ -5053,6 +5061,21 @@ def get_train_valid_partition(everyone_cohort_de_id):
     write_to_pickle(test_ids, "test_person_ids")
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.31ae971a-0175-49bf-b7ec-31fd900e58f5"),
+    positive_symptoms=Input(rid="ri.foundry.main.dataset.7cd7ede8-524b-4fe3-8ce1-10f268fcd51b"),
+    top_concept_names=Input(rid="ri.vector.main.execute.b8403268-f3cc-4380-ba0b-2f153eccfe29")
+)
+def important_concepts(positive_symptoms, top_concept_names):
+
+    names = top_concept_names[(top_concept_names["scale_above_threshold"]) > 0]
+    names = names[(names["count"] > 200)][["concept_name", "count", "scale_above_threshold"]]
+    concept_ids = positive_symptoms[["concept_name", "concept_id"]]
+    concept_ids = concept_ids.drop_duplicates()
+    df = pd.merge(names, concept_ids, "inner", "concept_name")
+
+    return df
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.71a84ecb-f5da-4847-937b-42a7fb9e1272"),
     location=Input(rid="ri.foundry.main.dataset.4805affe-3a77-4260-8da5-4f9ff77f51ab"),
     location_testing=Input(rid="ri.foundry.main.dataset.06b728e0-0262-4a7a-b9b7-fe91c3f7da34")
@@ -5284,6 +5307,41 @@ def measurement_testing_copy(measurement_testing, measurement):
 )
 def microvisits_to_macrovisits_testing_copy(microvisits_to_macrovisits_testing, microvisits_to_macrovisits):
     return microvisits_to_macrovisits_testing if LOAD_TEST == 1 else microvisits_to_macrovisits
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.02f756f5-d406-4b23-9438-a2d5a5c17cd9"),
+    Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
+    positive_symptoms=Input(rid="ri.foundry.main.dataset.7cd7ede8-524b-4fe3-8ce1-10f268fcd51b")
+)
+def nlp_sym_analysis(positive_symptoms, Long_COVID_Silver_Standard):
+    TABLE = positive_symptoms
+    CONCEPT_NAME_COL = "concept_name"
+    l, h = 0, 1000
+
+    label = Long_COVID_Silver_Standard.withColumn("outcome", F.greatest(*["pasc_code_after_four_weeks", "pasc_code_prior_four_weeks"]))
+    TABLE = TABLE.join(label, "person_id").select(F.col("person_id"), F.col(CONCEPT_NAME_COL), F.col("outcome")).filter(F.col(CONCEPT_NAME_COL) != "No matching concept")
+    distinct = TABLE.groupBy(CONCEPT_NAME_COL).count().orderBy("count", ascending=False).limit(h).select(F.col(CONCEPT_NAME_COL)).toPandas()[CONCEPT_NAME_COL]
+    
+    pos, count = [], []
+    cnt_cond = lambda cond: F.sum(F.when(cond, 1).otherwise(0))
+    print(len(distinct))
+    t = time.time()
+    for cname in distinct[l:]:
+        f = TABLE.agg(
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname)),
+            cnt_cond((F.col(CONCEPT_NAME_COL) == cname) & (F.col("outcome") == 1))
+        ).collect()
+        one_count = f[0][1]
+        size = f[0][0]
+        pos.append(one_count/size)
+        count.append(size)
+    print(time.time() - t)
+    r = pd.DataFrame(list(zip(distinct,pos, count)), columns=[CONCEPT_NAME_COL,"pos", "count"])
+    r['neg'] = r.apply(lambda row: 1-row.pos, axis = 1)
+    r['max'] = r.apply(lambda row: max(row.pos, 1-row.pos), axis=1)
+    r =r[[CONCEPT_NAME_COL,'pos','neg','max','count']]
+    
+    return r
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.d0963ac3-a28e-4423-bb15-758b9607be79"),
@@ -5682,12 +5740,257 @@ def person_information(everyone_cohort_de_id):
     return df
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.d3124557-f100-44a9-9c43-51db33c87bd8"),
+    broad_related_concepts=Input(rid="ri.foundry.main.dataset.ce8c17fb-63cd-41bd-b9c8-9bf54e5091da"),
+    personal_symptom=Input(rid="ri.vector.main.execute.e6a89a4f-39d6-4c79-9442-58464cc99c4a")
+)
+def person_nlp_symptom(personal_symptom, broad_related_concepts):
+    
+    personal_symptom_df = personal_symptom[['note_id', 'person_id', 'note_date', 'visit_occurrence_id']]
+    personal_symptom_df = personal_symptom_df.drop_duplicates()
+    personal_symptom_df = personal_symptom_df.set_index('note_id')
+    all_symptoms_df = broad_related_concepts
+    all_symptoms = list(set(all_symptoms_df["concept_set_name"]))
+
+    print(all_symptoms)
+
+    for symptom in all_symptoms:
+        symptom_column_name = "sympt_" + symptom.replace("-", "_")
+        new_symptom_df = personal_symptom[['note_id', 'term_modifier_certainty', 'concept_set_name']]
+        new_symptom_df = new_symptom_df.loc[new_symptom_df.concept_set_name == symptom]
+        new_symptom_df = new_symptom_df.rename(columns={'term_modifier_certainty': symptom_column_name})
+        new_symptom_df = new_symptom_df[["note_id", symptom_column_name]]
+        new_symptom_df = new_symptom_df.drop_duplicates()
+        
+        personal_symptom_df = personal_symptom_df.merge(new_symptom_df, on="note_id", how="left")
+        personal_symptom_df[symptom_column_name] = personal_symptom_df[symptom_column_name].map(lambda x: 1 if x == 'Positive' else (-1 if x == 'Negated' else np.nan))
+    
+    return personal_symptom_df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.2bedf996-10f5-4562-82d1-f32eab41e2cd"),
+    broad_related_concepts=Input(rid="ri.foundry.main.dataset.ce8c17fb-63cd-41bd-b9c8-9bf54e5091da"),
+    personal_symptom_testing=Input(rid="ri.vector.main.execute.f03d7693-0ede-47e1-97a3-9aa056c356c1")
+)
+def person_nlp_symptom_testing(personal_symptom_testing, broad_related_concepts):
+    
+    personal_symptom_df = personal_symptom_testing[['note_id', 'person_id', 'note_date', 'visit_occurrence_id']]
+    personal_symptom_df = personal_symptom_df.drop_duplicates()
+    personal_symptom_df = personal_symptom_df.set_index('note_id')
+    all_symptoms_df = broad_related_concepts
+    all_symptoms = list(set(all_symptoms_df["concept_set_name"]))
+
+    print(all_symptoms)
+
+    for symptom in all_symptoms:
+        symptom_column_name = "sympt_" + symptom.replace("-", "_")
+        new_symptom_df = personal_symptom_testing[['note_id', 'term_modifier_certainty', 'concept_set_name']]
+        new_symptom_df = new_symptom_df.loc[new_symptom_df.concept_set_name == symptom]
+        new_symptom_df = new_symptom_df.rename(columns={'term_modifier_certainty': symptom_column_name})
+        new_symptom_df = new_symptom_df[["note_id", symptom_column_name]]
+        new_symptom_df = new_symptom_df.drop_duplicates()
+        
+        personal_symptom_df = personal_symptom_df.merge(new_symptom_df, on="note_id", how="left")
+        personal_symptom_df[symptom_column_name] = personal_symptom_df[symptom_column_name].map(lambda x: 1 if x == 'Positive' else (-1 if x == 'Negated' else np.nan))
+    
+    return personal_symptom_df
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.543e1d80-626e-4a3d-a196-d0c7b434fb41"),
     person=Input(rid="ri.foundry.main.dataset.f71ffe18-6969-4a24-b81c-0e06a1ae9316"),
     person_testing=Input(rid="ri.foundry.main.dataset.06629068-25fc-4802-9b31-ead4ed515da4")
 )
 def person_testing_copy(person_testing, person):
     return person_testing if LOAD_TEST == 1 else person
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.73f9d829-203f-4e2d-88d2-0d168503b0b1"),
+    important_concepts=Input(rid="ri.foundry.main.dataset.31ae971a-0175-49bf-b7ec-31fd900e58f5"),
+    personal_symptom=Input(rid="ri.vector.main.execute.e6a89a4f-39d6-4c79-9442-58464cc99c4a")
+)
+def person_top_nlp_symptom(personal_symptom, important_concepts):
+    
+    personal_symptom_df = personal_symptom[['note_id', 'person_id', 'note_date', 'visit_occurrence_id']]
+    personal_symptom_df = personal_symptom_df.drop_duplicates()
+    personal_symptom_df = personal_symptom_df.set_index('note_id')
+    all_symptoms_df = important_concepts
+    all_symptoms = list(set(all_symptoms_df["concept_name"]))
+
+    print(all_symptoms)
+
+    for symptom in all_symptoms:
+        symptom_column_name = symptom.replace(' ', '_').replace('-', '_').replace(',', '').replace('(', '').replace(')', '')
+        new_symptom_df = personal_symptom[['note_id', 'term_modifier_certainty', 'concept_name']]
+
+        new_symptom_df = new_symptom_df.loc[new_symptom_df.concept_name == symptom]
+        new_symptom_df = new_symptom_df.rename(columns={'term_modifier_certainty': symptom_column_name})
+        new_symptom_df = new_symptom_df[["note_id", symptom_column_name]]
+        new_symptom_df = new_symptom_df.drop_duplicates()
+        
+        personal_symptom_df = personal_symptom_df.merge(new_symptom_df, on="note_id", how="left")
+        personal_symptom_df[symptom_column_name] = personal_symptom_df[symptom_column_name].map(lambda x: 1 if x == 'Positive' else (-1 if x == 'Negated' else np.nan))
+    
+    return personal_symptom_df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.bd7a9446-5e51-495e-a9bb-002150ffb664"),
+    important_concepts=Input(rid="ri.foundry.main.dataset.31ae971a-0175-49bf-b7ec-31fd900e58f5"),
+    personal_symptom_testing=Input(rid="ri.vector.main.execute.f03d7693-0ede-47e1-97a3-9aa056c356c1")
+)
+def person_top_nlp_symptom_testing(personal_symptom_testing, important_concepts):
+    
+    personal_symptom_df = personal_symptom_testing[['note_id', 'person_id', 'note_date', 'visit_occurrence_id']]
+    personal_symptom_df = personal_symptom_df.drop_duplicates()
+    personal_symptom_df = personal_symptom_df.set_index('note_id')
+    all_symptoms_df = important_concepts
+    all_symptoms = list(set(all_symptoms_df["concept_name"]))
+
+    print(all_symptoms)
+
+    for symptom in all_symptoms:
+        symptom_column_name = symptom.replace(' ', '_').replace('-', '_').replace(',', '').replace('(', '').replace(')', '')
+        new_symptom_df = personal_symptom_testing[['note_id', 'term_modifier_certainty', 'concept_name']]
+
+        new_symptom_df = new_symptom_df.loc[new_symptom_df.concept_name == symptom]
+        new_symptom_df = new_symptom_df.rename(columns={'term_modifier_certainty': symptom_column_name})
+        new_symptom_df = new_symptom_df[["note_id", symptom_column_name]]
+        new_symptom_df = new_symptom_df.drop_duplicates()
+        
+        personal_symptom_df = personal_symptom_df.merge(new_symptom_df, on="note_id", how="left")
+        personal_symptom_df[symptom_column_name] = personal_symptom_df[symptom_column_name].map(lambda x: 1 if x == 'Positive' else (-1 if x == 'Negated' else np.nan))
+    
+    return personal_symptom_df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.e5cca0dd-2ac9-42dd-886d-4c1358f19cd1"),
+    note=Input(rid="ri.foundry.main.dataset.e1b6b20b-72c9-4eb9-8ff9-9e30a617ff5f"),
+    note_nlp=Input(rid="ri.foundry.main.dataset.71d69f3c-3929-4703-848e-dcc17752e578")
+)
+#Purpose - The purpose of this pipeline is to produce an organized personal nlp processed notes.
+#Creator/Owner/contact - Jiani Huang
+#Last Update - 11/22/22
+
+def personal_notes(note_nlp, note):
+    
+    person_notes_df = note.select('person_id', 'note_id', 'note_date', 'visit_occurrence_id')
+    note_concept_df = note_nlp.select('note_nlp_id', 'note_id', 'term_modifier_certainty', 'note_nlp_concept_id', 'note_nlp_concept_name', )
+    df = person_notes_df.join(note_concept_df, 'note_id', 'left')
+
+    return df
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.659fd3c4-7929-475c-9c98-ab1c5787bee0"),
+    personal_notes=Input(rid="ri.foundry.main.dataset.e5cca0dd-2ac9-42dd-886d-4c1358f19cd1")
+)
+#Purpose - The purpose of this pipeline is to produce only positive negative symtoms that the notes are certain about
+#Creator/Owner/contact - Jiani Huang
+#Last Update - 11/22/22
+
+def personal_notes_pos_neg(personal_notes):
+    positive_mask = personal_notes['term_modifier_certainty'].isin(['Positive'])
+    negative_mask = personal_notes['term_modifier_certainty'].isin(['Negated'])
+    pos_neg_mask = personal_notes['term_modifier_certainty'].isin(['Positive', 'Negated'])
+
+    positive_personal_notes = personal_notes.filter(positive_mask)
+    negative_personal_notes = personal_notes.filter(negative_mask)
+    pos_neg_personal_notes = personal_notes.filter(pos_neg_mask)
+
+    note_with_both_pos_neg = positive_personal_notes.alias('a').join(negative_personal_notes.alias('b'), (F.col("a.note_id") == F.col("b.note_id")) & (F.col("a.note_nlp_concept_id") == F.col("b.note_nlp_concept_id")), "inner").select(F.col("a.note_id"),F.col("a.note_nlp_concept_id")) 
+    
+    df = pos_neg_personal_notes.alias('a').join(note_with_both_pos_neg.alias('b'), (F.col("a.note_id") == F.col("b.note_id")) & (F.col("a.note_nlp_concept_id") == F.col("b.note_nlp_concept_id")), "left_outer")\
+                 .where(F.col("b.note_id").isNull() & F.col("b.note_nlp_concept_id").isNull())\
+                 .select([F.col(f"a.{c}") for c in pos_neg_personal_notes.columns]).distinct()
+
+    # mask = personal_notes['term_modifier_certainty'].isin(['Positive', 'Negated'])
+    # pos_neg_personal_notes = personal_notes.filter(mask)
+
+    # # remove the cases where both positive and negative symptom occurs for the same note
+    # same_note_symptom = pos_neg_personal_notes
+
+    return df
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.5401aab6-6d11-45b7-a292-3485595c09bb"),
+    personal_notes_testing=Input(rid="ri.vector.main.execute.326200b6-875a-4eeb-a692-af4c162e894a")
+)
+#Purpose - The purpose of this pipeline is to produce only positive negative symtoms that the notes are certain about
+#Creator/Owner/contact - Jiani Huang
+#Last Update - 11/22/22
+
+def personal_notes_pos_neg_testing(personal_notes_testing):
+    positive_mask = personal_notes_testing['term_modifier_certainty'].isin(['Positive'])
+    negative_mask = personal_notes_testing['term_modifier_certainty'].isin(['Negated'])
+    pos_neg_mask = personal_notes_testing['term_modifier_certainty'].isin(['Positive', 'Negated'])
+
+    positive_personal_notes = personal_notes_testing.filter(positive_mask)
+    negative_personal_notes = personal_notes_testing.filter(negative_mask)
+    pos_neg_personal_notes = personal_notes_testing.filter(pos_neg_mask)
+
+    note_with_both_pos_neg = positive_personal_notes.alias('a').join(negative_personal_notes.alias('b'), (F.col("a.note_id") == F.col("b.note_id")) & (F.col("a.note_nlp_concept_id") == F.col("b.note_nlp_concept_id")), "inner").select(F.col("a.note_id"),F.col("a.note_nlp_concept_id")) 
+    
+    df = pos_neg_personal_notes.alias('a').join(note_with_both_pos_neg.alias('b'), (F.col("a.note_id") == F.col("b.note_id")) & (F.col("a.note_nlp_concept_id") == F.col("b.note_nlp_concept_id")), "left_outer")\
+                 .where(F.col("b.note_id").isNull() & F.col("b.note_nlp_concept_id").isNull())\
+                 .select([F.col(f"a.{c}") for c in pos_neg_personal_notes.columns]).distinct()
+
+    # mask = personal_notes['term_modifier_certainty'].isin(['Positive', 'Negated'])
+    # pos_neg_personal_notes = personal_notes.filter(mask)
+
+    # # remove the cases where both positive and negative symptom occurs for the same note
+    # same_note_symptom = pos_neg_personal_notes
+
+    return df
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.326200b6-875a-4eeb-a692-af4c162e894a"),
+    note_nlp_testing=Input(rid="ri.foundry.main.dataset.9c668691-6880-4da9-88bf-79196c3e0f5a"),
+    note_testing=Input(rid="ri.foundry.main.dataset.f841b321-04d3-4119-85c7-9bde2883f64c")
+)
+#Purpose - The purpose of this pipeline is to produce an organized personal nlp processed notes.
+#Creator/Owner/contact - Jiani Huang
+#Last Update - 11/22/22
+
+def personal_notes_testing(note_nlp_testing, note_testing):
+    
+    person_notes_df = note_testing.select('person_id', 'note_id', 'note_date', 'visit_occurrence_id')
+    note_concept_df = note_nlp_testing.select('note_nlp_id', 'note_id', 'term_modifier_certainty', 'note_nlp_concept_id', 'note_nlp_concept_name', )
+    df = person_notes_df.join(note_concept_df, 'note_id', 'left')
+
+    return df
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.e6a89a4f-39d6-4c79-9442-58464cc99c4a"),
+    personal_notes_pos_neg=Input(rid="ri.vector.main.execute.659fd3c4-7929-475c-9c98-ab1c5787bee0"),
+    related_concept=Input(rid="ri.vector.main.execute.bfe11b80-dcd4-4f4a-9d17-bec0433bedaa")
+)
+def personal_symptom(personal_notes_pos_neg, related_concept):
+    
+    personal_notes_pos_neg_df = personal_notes_pos_neg.select('*')
+    related_concept_df = related_concept.select('*')
+    df = personal_notes_pos_neg_df.join(related_concept_df, personal_notes_pos_neg_df.note_nlp_concept_id == related_concept_df.concept_id, 'inner')
+
+    return df
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.f03d7693-0ede-47e1-97a3-9aa056c356c1"),
+    personal_notes_pos_neg_testing=Input(rid="ri.vector.main.execute.5401aab6-6d11-45b7-a292-3485595c09bb"),
+    related_concept=Input(rid="ri.vector.main.execute.bfe11b80-dcd4-4f4a-9d17-bec0433bedaa")
+)
+def personal_symptom_testing(personal_notes_pos_neg_testing, related_concept):
+    
+    personal_notes_pos_neg_df = personal_notes_pos_neg_testing.select('*')
+    related_concept_df = related_concept.select('*')
+    df = personal_notes_pos_neg_df.join(related_concept_df, personal_notes_pos_neg_df.note_nlp_concept_id == related_concept_df.concept_id, 'inner')
+
+    return df
+
+@transform_pandas(
+    Output(rid="ri.foundry.main.dataset.7cd7ede8-524b-4fe3-8ce1-10f268fcd51b"),
+    personal_symptom=Input(rid="ri.vector.main.execute.e6a89a4f-39d6-4c79-9442-58464cc99c4a")
+)
+def positive_symptoms(personal_symptom):
+
+    rslt_df = personal_symptom[personal_symptom['term_modifier_certainty'] == "Positive"] 
+    return rslt_df
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.2d76588c-fe75-4d07-8044-f054444ec728"),
@@ -5931,10 +6234,11 @@ def recent_visits_2(all_patients_visit_day_facts_table_de_id):
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.f3ea4ea5-6240-4bd5-a633-b5ea0628226e"),
-    person_nlp_symptom=Input(rid="ri.foundry.main.dataset.48a30545-e47e-4ec1-8811-2f15ba55b045"),
+    person_nlp_symptom=Input(rid="ri.foundry.main.dataset.d3124557-f100-44a9-9c43-51db33c87bd8"),
     recent_visits=Input(rid="ri.foundry.main.dataset.d42a9b47-a06f-4d43-b113-7414a1bdb9b6")
 )
 def recent_visits_w_nlp_notes(recent_visits, person_nlp_symptom):
+    person_nlp_symptom = person_nlp_symptom
     person_nlp_symptom = person_nlp_symptom.merge(recent_visits[["person_id", "six_month_before_last_visit"]].drop_duplicates(), on="person_id", how="left")
     person_nlp_symptom = person_nlp_symptom.loc[person_nlp_symptom["note_date"] >= person_nlp_symptom["six_month_before_last_visit"]]
     person_nlp_symptom = person_nlp_symptom.rename(columns={"note_date": "visit_date"}).drop(columns=["six_month_before_last_visit", "note_id", "visit_occurrence_id"])
@@ -5947,10 +6251,11 @@ def recent_visits_w_nlp_notes(recent_visits, person_nlp_symptom):
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.fc6afa83-8c7a-4b04-a92a-ff1162651b0b"),
-    person_nlp_symptom=Input(rid="ri.foundry.main.dataset.48a30545-e47e-4ec1-8811-2f15ba55b045"),
+    person_nlp_symptom=Input(rid="ri.foundry.main.dataset.d3124557-f100-44a9-9c43-51db33c87bd8"),
     recent_visits_2=Input(rid="ri.foundry.main.dataset.bf18056e-2e27-4f2a-af1a-7b6cabc2a9cf")
 )
 def recent_visits_w_nlp_notes_2(recent_visits_2, person_nlp_symptom):
+    person_nlp_symptom = person_nlp_symptom
     person_nlp_symptom = person_nlp_symptom.join(recent_visits_2.select(["person_id", "six_month_before_last_visit"]).distinct(), on="person_id", how="left")
     person_nlp_symptom = person_nlp_symptom.where(person_nlp_symptom["note_date"] >= person_nlp_symptom["six_month_before_last_visit"])
     person_nlp_symptom = person_nlp_symptom.withColumnRenamed("note_date", "visit_date").drop(*["six_month_before_last_visit", "note_id", "visit_occurrence_id"])
@@ -5966,6 +6271,20 @@ def recent_visits_w_nlp_notes_2(recent_visits_2, person_nlp_symptom):
     # df = recent_visits_2.merge(person_nlp_symptom, on=["person_id", "visit_date"], how="left").sort_values(["person_id", "visit_date"])#.fillna(0.0)
 
     return df
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.bfe11b80-dcd4-4f4a-9d17-bec0433bedaa"),
+    broad_related_concepts=Input(rid="ri.foundry.main.dataset.ce8c17fb-63cd-41bd-b9c8-9bf54e5091da"),
+    concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6")
+)
+def related_concept(concept_set_members, broad_related_concepts):
+    related_concepts = broad_related_concepts
+    
+    concept_set_members_df = concept_set_members.select("codeset_id",  "concept_id", "concept_name",)
+    related_concepts_df = related_concepts.select("codeset_id", "concept_set_name",)
+    df = concept_set_members_df.join(related_concepts_df, "codeset_id", 'right')
+    return df
+    
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.48f1d68a-4344-4b76-ae4e-7fadb12349ea"),
@@ -6090,6 +6409,14 @@ def top_concept_ids(condition_table_analysis, device_table_analysis_1, drug_tabl
     observation_table_analysis_1 = observation_table_analysis_1.withColumn("domain", F.lit("observation"))
     r = observation_table_analysis_1.union(procedure_table_analysis_1).union(drug_table_analysis_1).union(device_table_analysis_1).union(condition_table_analysis)
     r = r.withColumn("scale_above_.8", F.when((F.col("max") > 0.8), F.col("max")*F.col("count")).otherwise(F.lit(0)))
+    return r
+
+@transform_pandas(
+    Output(rid="ri.vector.main.execute.b8403268-f3cc-4380-ba0b-2f153eccfe29"),
+    nlp_sym_analysis=Input(rid="ri.foundry.main.dataset.02f756f5-d406-4b23-9438-a2d5a5c17cd9")
+)
+def top_concept_names(nlp_sym_analysis):
+    r = nlp_sym_analysis.withColumn("scale_above_threshold", F.when((F.col("max") > 0.65), F.col("max")*F.col("count")).otherwise(F.lit(0)))
     return r
 
 @transform_pandas(
