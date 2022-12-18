@@ -8962,6 +8962,17 @@ def valid_mTan(train_sequential_model_3, produce_dataset):
     print("validation auc score::", val_auc)
     print("validation recall::", val_recall)
     print("validation precision score::", val_precision)
+    print(valid_person_ids)
+    print(len(valid_person_ids))
+
+    print(person_ids)
+    print(len(person_ids))
+
+    print(pred_scores)
+    print(len(pred_scores))
+
+    print(scores)
+    print(len(scores))
 
     valid_predictions = pd.DataFrame.from_dict({
             'person_id': list(valid_person_ids) + list(person_ids),
