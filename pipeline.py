@@ -427,12 +427,12 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
 
 def pre_processing_visits2(person_ids, all_person_info, recent_visit, label, setup="both", start_col_id = 5, end_col_id=-1, label_col_name = None):
     label = label.set_index("person_id")
-    if type(person_ids) is list:
-        all_person_ids = person_ids
-        all_person_ids.sort()
-    else:         
-        all_person_ids = list(label.index.unique())
-        all_person_ids.sort()
+    # if type(person_ids) is list:
+    #     all_person_ids = person_ids
+    #     all_person_ids.sort()
+    # else:         
+    all_person_ids = list(label.index.unique())
+    all_person_ids.sort()
     if all_person_info is not None:
         all_person_info = all_person_info.set_index("person_id")
         print(all_person_info)
@@ -450,13 +450,15 @@ def pre_processing_visits2(person_ids, all_person_info, recent_visit, label, set
     label_tensor_ls = []
     person_count=0
     for person_id in all_person_ids:
-        if all_person_info is not None:
+        if person_id in all_person_info.index:
             person_info = all_person_info.loc[person_id]
             # print("person info::", person_info)
             # print("person info values::", person_info.values.tolist())
             person_info_tensor = torch.tensor([
                 person_info.values.tolist()[1:-1]
             ])
+        else:
+            person_info_tensor = torch.zeros(len(all_person_info.columns)-2)
         visits = recent_visit.loc[person_id]
         visit_tensors = []
         time_steps = []
@@ -1129,7 +1131,8 @@ def train_mTans(lr, norm, std, alpha, k_iwae, dim, latent_dim, rec, dec, classif
                 print("local iter::", local_iter, len(train_loader))
 
             train_batch, label, person_info_batch = item
-            person_info_batch = person_info_batch.float().to(device)
+            if person_info_batch is not None:
+                person_info_batch = person_info_batch.float().to(device)
             train_batch = train_batch.float()
             observed_data, observed_mask, observed_tp = train_batch[:, :, :dim], train_batch[:, :, dim:2*dim], train_batch[:, :, -1]
             observed_data, observed_mask, observed_tp = observed_data.to(device), observed_mask.to(device), observed_tp.to(device)
@@ -1190,6 +1193,9 @@ def train_mTans(lr, norm, std, alpha, k_iwae, dim, latent_dim, rec, dec, classif
             optimizer_state_dict = optimizer.state_dict()
             best_true, best_pred_labels = true.copy(), pred_labels.copy()
             best_train_true, best_train_pred_labels = train_true.copy(), train_pred_labels.copy()
+            write_to_pickle(rec_state_dict, "mTans_rec")
+            write_to_pickle(dec_state_dict, "mTans_dec")
+            write_to_pickle(classifier_state_dict, "mTans_classifier")
 
     return best_true, best_pred_labels, best_train_true, best_train_pred_labels, rec_state_dict, dec_state_dict, classifier_state_dict
         # test_loss, test_acc, test_auc = evaluate_classifier(
@@ -6644,10 +6650,10 @@ def train_sequential_model_3_rebalance(train_sequential_model_3, train_valid_spl
     # dec = dec.to(device)
     # classifier = classifier.to(device)
     best_valid_true, best_valid_pred_labels, best_train_true, best_train_pred_labels, rec_state_dict, dec_state_dict, classifier_state_dict = train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
-    device = torch.device('cpu')
-    write_to_pickle(rec_state_dict, "mTans_rec_reweight")
-    write_to_pickle(dec_state_dict, "mTans_dec_reweight")
-    write_to_pickle(classifier_state_dict, "mTans_classifier_reweight")
+    # device = torch.device('cpu')
+    # write_to_pickle(rec_state_dict, "mTans_rec_reweight")
+    # write_to_pickle(dec_state_dict, "mTans_dec_reweight")
+    # write_to_pickle(classifier_state_dict, "mTans_classifier_reweight")
     # read_from_pickle()
     print("save models successfully")
     # Make predictions on test data
