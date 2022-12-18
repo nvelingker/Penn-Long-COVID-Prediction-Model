@@ -7424,7 +7424,7 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     gbc_sort_features_least = np.argsort(gbc.feature_importances_.flatten())[:20]
 
     fig, axs = plt.subplots(2,2, constrained_layout=True, figsize=(8,8))
-    fig.suptitle('Twenty Most Important Features Per Model')
+    fig.suptitle('Twenty Most Important Features Per Model (Handpicked)')
     axs[0][0].bar(x = np.arange(20), height = rfc.feature_importances_.flatten()[rfc_sort_features], tick_label=[cols[1:][i] for i in rfc_sort_features])
     axs[0][0].set_xticklabels(labels=[cols[1:][i] for i in rfc_sort_features], fontdict={'rotation':"vertical",'size':'xx-small'})
     axs[0][0].set_ylabel("Purity-based Importance", size='small')
@@ -7932,13 +7932,13 @@ def train_test_top_k_model(top_k_concepts_data, top_k_concepts_data_test, Long_C
     rfc = RandomForestClassifier(random_state=1).fit(X_train, y_train)
     gbc = GradientBoostingClassifier(random_state=1).fit(X_train, y_train)
 
-    lrc_sort_features = np.argsort(lrc.coef_.flatten())[-20:]
+    lrc_sort_features = np.argsort(lrc.coef_.flatten())[-21:-1]
     lrc_sort_features_least = np.argsort(lrc.coef_.flatten())[:20]
-    lrc2_sort_features = np.argsort(lrc2.coef_.flatten())[-20:]
+    lrc2_sort_features = np.argsort(lrc2.coef_.flatten())[-21:-1]
     lrc2_sort_features_least = np.argsort(lrc2.coef_.flatten())[:20]
-    rfc_sort_features = np.argsort(rfc.feature_importances_.flatten())[-20:]
+    rfc_sort_features = np.argsort(rfc.feature_importances_.flatten())[-21:-1]
     rfc_sort_features_least = np.argsort(rfc.feature_importances_.flatten())[:20]
-    gbc_sort_features = np.argsort(gbc.feature_importances_.flatten())[-20:]
+    gbc_sort_features = np.argsort(gbc.feature_importances_.flatten())[-21:-1]
     gbc_sort_features_least = np.argsort(gbc.feature_importances_.flatten())[:20]
 
     fig, axs = plt.subplots(2,2, constrained_layout=True, figsize=(8,8))
