@@ -8955,7 +8955,7 @@ def valid_mTan(train_sequential_model_3, produce_dataset):
     
     # valid_pred_labels =  evaluate_classifier(rec, valid_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
     val_loss, val_acc, val_auc, val_recall, val_precision,true, pred_labels, pred_scores = evaluate_classifier_final(rec, valid_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
-    loss, acc, auc, recall, precision,true, labels, scores = evaluate_classifier_final(rec, valid_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+    loss, acc, auc, recall, precision,true, labels, scores = evaluate_classifier_final(rec, train_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
 
     print("validation loss::", val_loss)
     print("validation accuracy::", val_acc)
