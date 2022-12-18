@@ -8989,8 +8989,9 @@ def valid_mTan(train_sequential_model_3, produce_dataset):
     valid_mTan=Input(rid="ri.foundry.main.dataset.78717ca8-ae81-4a08-8df8-d3ec16e75f18")
 )
 def validation_metrics( train_test_model, train_test_top_k_model, valid_mTan, test_mTan):
-    train_test_top_k_model = train_test_top_k_model.drop("outcome", axis=1)
+    
     if not LOAD_TEST:
+        train_test_top_k_model = train_test_top_k_model.drop("outcome", axis=1)
         df = train_test_model.merge(train_test_top_k_model, on="person_id", how="left").merge(valid_mTan, on="person_id", how="left")
     else:
         df = train_test_model.merge(train_test_top_k_model, on="person_id", how="left").merge(test_mTan, on="person_id", how="left")
