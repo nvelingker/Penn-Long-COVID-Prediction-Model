@@ -1173,12 +1173,13 @@ def test_classifier(model, test_loader, dec=None, latent_dim=None, classify_pert
             #     test_loss += nn.CrossEntropyLoss()(out, label.long()).item() * batch_len * num_sample
         pred.append(out.cpu())
         # true.append(label.cpu())
+    pred = torch.cat(pred, 0)
     pred_scores = torch.sigmoid(pred[:, 1])
     pred_scores = pred_scores.numpy()
     pred_labels = (pred_scores > 0.5).reshape(-1).astype(int)
     return pred_labels, pred_scores
 
-    # pred = torch.cat(pred, 0)
+    # 
     # true = torch.cat(true, 0)
     
 
@@ -8848,11 +8849,14 @@ def train_valid_split( Long_COVID_Silver_Standard, num_recent_visits):
 )
 def valid_mTan(train_sequential_model_3, produce_dataset):
     valid_person_ids, valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_ls, data_min, data_max = read_from_pickle(produce_dataset, "valid_data.pickle")
+    person_ids, visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_ls, _,_ = read_from_pickle(produce_dataset, "valid_data.pickle")
 
     valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_ls, data_min, data_max)
+    train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_ls, data_min, data_max)
     static_input_dim = valid_dataset.__getitem__(1)[3].shape[-1]
 
     valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=4, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
     dim = valid_dataset.__getitem__(1)[0].shape[-1]
     latent_dim=20
     rec_hidden=32
@@ -8882,6 +8886,7 @@ def valid_mTan(train_sequential_model_3, produce_dataset):
     
     # valid_pred_labels =  evaluate_classifier(rec, valid_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
     val_loss, val_acc, val_auc, val_recall, val_precision,true, pred_labels, pred_scores = evaluate_classifier_final(rec, valid_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+    loss, acc, auc, recall, precision,true, labels, scores = evaluate_classifier_final(rec, valid_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
 
     print("validation loss::", val_loss)
     print("validation accuracy::", val_acc)
@@ -8890,8 +8895,8 @@ def valid_mTan(train_sequential_model_3, produce_dataset):
     print("validation precision score::", val_precision)
 
     valid_predictions = pd.DataFrame.from_dict({
-            'person_id': valid_person_ids,
-            'mTans_outcome': pred_scores.tolist()
+            'person_id': list(valid_person_ids) + list(person_ids),
+            'mTans_outcome': pred_scores.tolist() + scores.tolist()
         }, orient='columns')
 
     return valid_predictions
