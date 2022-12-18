@@ -7416,11 +7416,34 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
 
     lrc_sort_features = np.argsort(lrc.coef_.flatten())[-20:]
     lrc_sort_features_least = np.argsort(lrc.coef_.flatten())[:20]
+    lrc2_sort_features = np.argsort(lrc2.coef_.flatten())[-20:]
+    lrc2_sort_features_least = np.argsort(lrc2.coef_.flatten())[:20]
     rfc_sort_features = np.argsort(rfc.feature_importances_.flatten())[-20:]
     rfc_sort_features_least = np.argsort(rfc.feature_importances_.flatten())[:20]
-    plt.bar(np.arange(20), rfc.feature_importances_.flatten()[rfc_sort_features])
-    plt.xticks(np.arange(20), [cols[1:][i] for i in rfc_sort_features], rotation='vertical')
-    plt.tight_layout()
+    gbc_sort_features = np.argsort(gbc.feature_importances_.flatten())[-20:]
+    gbc_sort_features_least = np.argsort(gbc.feature_importances_.flatten())[:20]
+
+    fig, axs = plt.subplots(2,2, constrained_layout=True, figsize=(8,8))
+    fig.suptitle('Twenty Most Important Features Per Model')
+    axs[0][0].bar(x = np.arange(20), height = rfc.feature_importances_.flatten()[rfc_sort_features], tick_label=[cols[1:][i] for i in rfc_sort_features])
+    axs[0][0].set_xticklabels(labels=[cols[1:][i] for i in rfc_sort_features], fontdict={'rotation':"vertical",'size':'xx-small'})
+    axs[0][0].set_ylabel("Purity-based Importance", size='small')
+    axs[0][0].set_title("Random Forest Classifier")
+    
+    axs[0][1].bar(x = np.arange(20), height = lrc.coef_.flatten()[lrc_sort_features], tick_label=[cols[1:][i] for i in lrc_sort_features])
+    axs[0][1].set_xticklabels(labels=[cols[1:][i] for i in lrc_sort_features], fontdict={'rotation':"vertical", 'size':'xx-small'})
+    axs[0][1].set_ylabel("Coefficient-based Importance", size='small')
+    axs[0][1].set_title("Logistic Regression Classifier")
+
+    axs[1][0].bar(x = np.arange(20), height = gbc.feature_importances_.flatten()[gbc_sort_features], tick_label=[cols[1:][i] for i in gbc_sort_features])
+    axs[1][0].set_xticklabels(labels=[cols[1:][i] for i in gbc_sort_features], fontdict={'rotation':"vertical",'size':'xx-small'})
+    axs[1][0].set_ylabel("Purity-based Importance", size='small')
+    axs[1][0].set_title("Gradient Boosted Classifier")
+
+    axs[1][1].bar(x = np.arange(20), height = lrc2.coef_.flatten()[lrc2_sort_features], tick_label=[cols[1:][i] for i in lrc2_sort_features])
+    axs[1][1].set_xticklabels(labels=[cols[1:][i] for i in lrc2_sort_features], fontdict={'rotation':"vertical", 'size':'xx-small'})
+    axs[1][1].set_ylabel("Coefficient-based Importance", size='small')
+    axs[1][1].set_title(" Balanced Logistic Regression Classifier")
     plt.show()
 
     print("lrc important features:", [cols[1:][int(i)] for i in lrc_sort_features])
@@ -7911,11 +7934,34 @@ def train_test_top_k_model(top_k_concepts_data, top_k_concepts_data_test, Long_C
 
     lrc_sort_features = np.argsort(lrc.coef_.flatten())[-20:]
     lrc_sort_features_least = np.argsort(lrc.coef_.flatten())[:20]
+    lrc2_sort_features = np.argsort(lrc2.coef_.flatten())[-20:]
+    lrc2_sort_features_least = np.argsort(lrc2.coef_.flatten())[:20]
     rfc_sort_features = np.argsort(rfc.feature_importances_.flatten())[-20:]
     rfc_sort_features_least = np.argsort(rfc.feature_importances_.flatten())[:20]
-    plt.bar(np.arange(20), rfc.feature_importances_.flatten()[rfc_sort_features])
-    plt.xticks(np.arange(20), [cols[1:][i] for i in rfc_sort_features], rotation='vertical')
-    plt.tight_layout()
+    gbc_sort_features = np.argsort(gbc.feature_importances_.flatten())[-20:]
+    gbc_sort_features_least = np.argsort(gbc.feature_importances_.flatten())[:20]
+
+    fig, axs = plt.subplots(2,2, constrained_layout=True, figsize=(8,8))
+    fig.suptitle('Twenty Most Important Features Per Model')
+    axs[0][0].bar(x = np.arange(20), height = rfc.feature_importances_.flatten()[rfc_sort_features], tick_label=[cols[1:][i] for i in rfc_sort_features])
+    axs[0][0].set_xticklabels(labels=[cols[1:][i] for i in rfc_sort_features], fontdict={'rotation':"vertical",'size':'xx-small'})
+    axs[0][0].set_ylabel("Purity-based Importance", size='small')
+    axs[0][0].set_title("Random Forest Classifier")
+    
+    axs[0][1].bar(x = np.arange(20), height = lrc.coef_.flatten()[lrc_sort_features], tick_label=[cols[1:][i] for i in lrc_sort_features])
+    axs[0][1].set_xticklabels(labels=[cols[1:][i] for i in lrc_sort_features], fontdict={'rotation':"vertical", 'size':'xx-small'})
+    axs[0][1].set_ylabel("Coefficient-based Importance", size='small')
+    axs[0][1].set_title("Logistic Regression Classifier")
+
+    axs[1][0].bar(x = np.arange(20), height = gbc.feature_importances_.flatten()[gbc_sort_features], tick_label=[cols[1:][i] for i in gbc_sort_features])
+    axs[1][0].set_xticklabels(labels=[cols[1:][i] for i in gbc_sort_features], fontdict={'rotation':"vertical",'size':'xx-small'})
+    axs[1][0].set_ylabel("Purity-based Importance", size='small')
+    axs[1][0].set_title("Gradient Boosted Classifier")
+
+    axs[1][1].bar(x = np.arange(20), height = lrc2.coef_.flatten()[lrc2_sort_features], tick_label=[cols[1:][i] for i in lrc2_sort_features])
+    axs[1][1].set_xticklabels(labels=[cols[1:][i] for i in lrc2_sort_features], fontdict={'rotation':"vertical", 'size':'xx-small'})
+    axs[1][1].set_ylabel("Coefficient-based Importance", size='small')
+    axs[1][1].set_title(" Balanced Logistic Regression Classifier")
     plt.show()
 
     print("lrc important features:", [cols[1:][int(i)] for i in lrc_sort_features])
@@ -7985,38 +8031,38 @@ def validation_metrics( train_test_model, train_test_top_k_model):
     outcomes = [i for i in df.columns if i.endswith("_outcome") and not "ens" in i and not "nn" in i]
     print(outcomes)
     df['all_ens_outcome'] = df.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
+    
     for i in [i for i in df.columns if i != "person_id"]:
         print("{} Classification Report:\n{}".format(i, classification_report(df["outcome"], np.where(df[i] > 0.5, 1, 0))))
+        print(i, " MAE:", mean_absolute_error(df['outcome'], np.where(df[i] > 0.5, 1, 0)))
+        print(i, " Brier score:", brier_score_loss(df['outcome'], df[i]))
+        print(i, " AP:", average_precision_score(df['outcome'], df[i]))
+        print(i, " ROC AUC:", roc_auc_score(df['outcome'], df[i]))
+        print("-"*10)
 
-    print("LR MAE:", mean_absolute_error(df['outcome'], np.where(df["lr_outcome"] > 0.5, 1, 0)))
-    print("LR Brier score:", brier_score_loss(df['outcome'], df["lr_outcome"]))
-    print("LR AP:", average_precision_score(df['outcome'], df["lr_outcome"]))
-    print("LR ROC AUC:", roc_auc_score(df['outcome'], df["lr_outcome"]))
-    print("-"*10)
+    # print("RF MAE:", mean_absolute_error(df['outcome'], np.where(df["rf_outcome"] > 0.5, 1, 0)))
+    # print("RF Brier score:", brier_score_loss(df['outcome'], df["rf_outcome"]))
+    # print("RF AP:", average_precision_score(df['outcome'], df["rf_outcome"]))
+    # print("RF ROC AUC:", roc_auc_score(df['outcome'], df["rf_outcome"]))
+    # print("-"*10)
 
-    print("RF MAE:", mean_absolute_error(df['outcome'], np.where(df["rf_outcome"] > 0.5, 1, 0)))
-    print("RF Brier score:", brier_score_loss(df['outcome'], df["rf_outcome"]))
-    print("RF AP:", average_precision_score(df['outcome'], df["rf_outcome"]))
-    print("RF ROC AUC:", roc_auc_score(df['outcome'], df["rf_outcome"]))
-    print("-"*10)
+    # print("GBC MAE:", mean_absolute_error(df['outcome'], np.where(df["gb_outcome"] > 0.5, 1, 0)))
+    # print("GBC Brier score:", brier_score_loss(df['outcome'], df["gb_outcome"]))
+    # print("GBC AP:", average_precision_score(df['outcome'], df["gb_outcome"]))
+    # print("GBC ROC AUC:", roc_auc_score(df['outcome'], df["gb_outcome"]))
+    # print("-"*10)
 
-    print("GBC MAE:", mean_absolute_error(df['outcome'], np.where(df["gb_outcome"] > 0.5, 1, 0)))
-    print("GBC Brier score:", brier_score_loss(df['outcome'], df["gb_outcome"]))
-    print("GBC AP:", average_precision_score(df['outcome'], df["gb_outcome"]))
-    print("GBC ROC AUC:", roc_auc_score(df['outcome'], df["gb_outcome"]))
-    print("-"*10)
+    # print("NN MAE:", mean_absolute_error(df['outcome'], np.where(df["nn_outcome"] > 0.5, 1, 0)))
+    # print("NN Brier score:", brier_score_loss(df['outcome'], df["nn_outcome"]))
+    # print("NN AP:", average_precision_score(df['outcome'], df["nn_outcome"]))
+    # print("NN ROC AUC:", roc_auc_score(df['outcome'], df["nn_outcome"]))
+    # print("-"*10)
 
-    print("NN MAE:", mean_absolute_error(df['outcome'], np.where(df["nn_outcome"] > 0.5, 1, 0)))
-    print("NN Brier score:", brier_score_loss(df['outcome'], df["nn_outcome"]))
-    print("NN AP:", average_precision_score(df['outcome'], df["nn_outcome"]))
-    print("NN ROC AUC:", roc_auc_score(df['outcome'], df["nn_outcome"]))
-    print("-"*10)
+    # print("ENS MAE:", mean_absolute_error(df['outcome'], np.where(df["ens_outcome"] > 0.5, 1, 0)))
+    # print("ENS Brier score:", brier_score_loss(df['outcome'], df["ens_outcome"]))
+    # print("ENS AP:", average_precision_score(df['outcome'], df["ens_outcome"]))
+    # print("ENS ROC AUC:", roc_auc_score(df['outcome'], df["ens_outcome"]))
+    # print("-"*10)
 
-    print("ENS MAE:", mean_absolute_error(df['outcome'], np.where(df["ens_outcome"] > 0.5, 1, 0)))
-    print("ENS Brier score:", brier_score_loss(df['outcome'], df["ens_outcome"]))
-    print("ENS AP:", average_precision_score(df['outcome'], df["ens_outcome"]))
-    print("ENS ROC AUC:", roc_auc_score(df['outcome'], df["ens_outcome"]))
-    print("-"*10)
-
-    return df
+    # return df
 
