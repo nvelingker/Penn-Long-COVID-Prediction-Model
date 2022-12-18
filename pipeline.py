@@ -388,6 +388,8 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
     else:
         label_tensor_ls = []
     person_count=0
+    print(recent_visit.columns)
+    print(len(recent_visit.columns))
     for person_id in all_person_ids:
         if all_person_info is not None:
             person_info = all_person_info.loc[person_id]
@@ -400,7 +402,7 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
         visits = recent_visit.loc[person_id]
         visit_tensors = []
         time_steps = []
-        # print(visits)
+        # print(len(recent_visit.columns))
         visits_tensor2 = torch.from_numpy(np.array(visits.iloc[:,start_col_id:end_col_id].values.tolist()))
         time_steps2 = torch.from_numpy(np.array(visits["diff_days"].values.tolist()))
         for i in range(len(visits)):
@@ -438,7 +440,7 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
         if person_info_ls is not None:
             person_info_ls.append(person_info_tensor)
         person_count +=1
-        if person_count %100 == 0:
+        if person_count %10000 == 0:
             print("person count::", person_count)
     if return_person_ids:
         return visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, all_person_ids
@@ -5225,7 +5227,7 @@ def get_train_valid_partition(everyone_cohort_de_id):
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.31ae971a-0175-49bf-b7ec-31fd900e58f5"),
     positive_symptoms=Input(rid="ri.foundry.main.dataset.7cd7ede8-524b-4fe3-8ce1-10f268fcd51b"),
-    top_concept_names=Input(rid="ri.vector.main.execute.b8403268-f3cc-4380-ba0b-2f153eccfe29")
+    top_concept_names=Input(rid="ri.foundry.main.dataset.e5cacf25-d71d-44ee-a3da-6bad8eaf53e8")
 )
 def important_concepts(positive_symptoms, top_concept_names):
 
@@ -5935,7 +5937,7 @@ def person_information_testing(everyone_cohort_de_id_testing):
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.d3124557-f100-44a9-9c43-51db33c87bd8"),
     broad_related_concepts=Input(rid="ri.foundry.main.dataset.ce8c17fb-63cd-41bd-b9c8-9bf54e5091da"),
-    personal_symptom=Input(rid="ri.vector.main.execute.e6a89a4f-39d6-4c79-9442-58464cc99c4a")
+    personal_symptom=Input(rid="ri.foundry.main.dataset.4ba26dbd-1e38-48bd-8981-823339eb97f8")
 )
 def person_nlp_symptom(personal_symptom, broad_related_concepts):
     
@@ -5963,7 +5965,7 @@ def person_nlp_symptom(personal_symptom, broad_related_concepts):
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.2bedf996-10f5-4562-82d1-f32eab41e2cd"),
     broad_related_concepts=Input(rid="ri.foundry.main.dataset.ce8c17fb-63cd-41bd-b9c8-9bf54e5091da"),
-    personal_symptom_testing=Input(rid="ri.vector.main.execute.f03d7693-0ede-47e1-97a3-9aa056c356c1")
+    personal_symptom_testing=Input(rid="ri.foundry.main.dataset.68b9ff1f-582a-4c69-b70d-a321d56c5357")
 )
 def person_nlp_symptom_testing(personal_symptom_testing, broad_related_concepts):
     
@@ -5999,7 +6001,7 @@ def person_testing_copy(person_testing, person):
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.73f9d829-203f-4e2d-88d2-0d168503b0b1"),
     important_concepts=Input(rid="ri.foundry.main.dataset.31ae971a-0175-49bf-b7ec-31fd900e58f5"),
-    personal_symptom=Input(rid="ri.vector.main.execute.e6a89a4f-39d6-4c79-9442-58464cc99c4a")
+    personal_symptom=Input(rid="ri.foundry.main.dataset.4ba26dbd-1e38-48bd-8981-823339eb97f8")
 )
 def person_top_nlp_symptom(personal_symptom, important_concepts):
     
@@ -6028,7 +6030,7 @@ def person_top_nlp_symptom(personal_symptom, important_concepts):
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.bd7a9446-5e51-495e-a9bb-002150ffb664"),
     important_concepts=Input(rid="ri.foundry.main.dataset.31ae971a-0175-49bf-b7ec-31fd900e58f5"),
-    personal_symptom_testing=Input(rid="ri.vector.main.execute.f03d7693-0ede-47e1-97a3-9aa056c356c1")
+    personal_symptom_testing=Input(rid="ri.foundry.main.dataset.68b9ff1f-582a-4c69-b70d-a321d56c5357")
 )
 def person_top_nlp_symptom_testing(personal_symptom_testing, important_concepts):
     
@@ -6072,7 +6074,7 @@ def personal_notes(note_nlp, note):
     return df
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.659fd3c4-7929-475c-9c98-ab1c5787bee0"),
+    Output(rid="ri.foundry.main.dataset.1904146f-f481-4cc1-ab34-e242424af285"),
     personal_notes=Input(rid="ri.foundry.main.dataset.e5cca0dd-2ac9-42dd-886d-4c1358f19cd1")
 )
 #Purpose - The purpose of this pipeline is to produce only positive negative symtoms that the notes are certain about
@@ -6103,8 +6105,8 @@ def personal_notes_pos_neg(personal_notes):
     return df
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.5401aab6-6d11-45b7-a292-3485595c09bb"),
-    personal_notes_testing=Input(rid="ri.vector.main.execute.326200b6-875a-4eeb-a692-af4c162e894a")
+    Output(rid="ri.foundry.main.dataset.b5e24d84-8796-487c-a0d9-69f4a7d56bb0"),
+    personal_notes_testing=Input(rid="ri.foundry.main.dataset.26396608-ae5e-498c-ac79-872b01e61199")
 )
 #Purpose - The purpose of this pipeline is to produce only positive negative symtoms that the notes are certain about
 #Creator/Owner/contact - Jiani Huang
@@ -6134,7 +6136,7 @@ def personal_notes_pos_neg_testing(personal_notes_testing):
     return df
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.326200b6-875a-4eeb-a692-af4c162e894a"),
+    Output(rid="ri.foundry.main.dataset.26396608-ae5e-498c-ac79-872b01e61199"),
     note_nlp_testing=Input(rid="ri.foundry.main.dataset.9c668691-6880-4da9-88bf-79196c3e0f5a"),
     note_testing=Input(rid="ri.foundry.main.dataset.f841b321-04d3-4119-85c7-9bde2883f64c")
 )
@@ -6151,9 +6153,9 @@ def personal_notes_testing(note_nlp_testing, note_testing):
     return df
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.e6a89a4f-39d6-4c79-9442-58464cc99c4a"),
-    personal_notes_pos_neg=Input(rid="ri.vector.main.execute.659fd3c4-7929-475c-9c98-ab1c5787bee0"),
-    related_concept=Input(rid="ri.vector.main.execute.bfe11b80-dcd4-4f4a-9d17-bec0433bedaa")
+    Output(rid="ri.foundry.main.dataset.4ba26dbd-1e38-48bd-8981-823339eb97f8"),
+    personal_notes_pos_neg=Input(rid="ri.foundry.main.dataset.1904146f-f481-4cc1-ab34-e242424af285"),
+    related_concept=Input(rid="ri.foundry.main.dataset.73261589-80e1-4205-a060-e1d6eeb83d55")
 )
 def personal_symptom(personal_notes_pos_neg, related_concept):
     
@@ -6164,9 +6166,9 @@ def personal_symptom(personal_notes_pos_neg, related_concept):
     return df
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.f03d7693-0ede-47e1-97a3-9aa056c356c1"),
-    personal_notes_pos_neg_testing=Input(rid="ri.vector.main.execute.5401aab6-6d11-45b7-a292-3485595c09bb"),
-    related_concept=Input(rid="ri.vector.main.execute.bfe11b80-dcd4-4f4a-9d17-bec0433bedaa")
+    Output(rid="ri.foundry.main.dataset.68b9ff1f-582a-4c69-b70d-a321d56c5357"),
+    personal_notes_pos_neg_testing=Input(rid="ri.foundry.main.dataset.b5e24d84-8796-487c-a0d9-69f4a7d56bb0"),
+    related_concept=Input(rid="ri.foundry.main.dataset.73261589-80e1-4205-a060-e1d6eeb83d55")
 )
 def personal_symptom_testing(personal_notes_pos_neg_testing, related_concept):
     
@@ -6178,7 +6180,7 @@ def personal_symptom_testing(personal_notes_pos_neg_testing, related_concept):
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.7cd7ede8-524b-4fe3-8ce1-10f268fcd51b"),
-    personal_symptom=Input(rid="ri.vector.main.execute.e6a89a4f-39d6-4c79-9442-58464cc99c4a")
+    personal_symptom=Input(rid="ri.foundry.main.dataset.4ba26dbd-1e38-48bd-8981-823339eb97f8")
 )
 def positive_symptoms(personal_symptom):
 
@@ -6260,7 +6262,7 @@ def produce_dataset(train_valid_split, Long_COVID_Silver_Standard, person_inform
     valid_person_info = valid_person_ids.join(person_information, on="person_id")
 
     print("start pre-processing!!!")
-    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls = pre_processing_visits(train_person_ids.toPandas(), train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both")
+    visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, person_ids = pre_processing_visits(train_person_ids.toPandas(), train_person_info.toPandas(), train_recent_visits.toPandas(), train_labels.toPandas(), setup="both", return_person_ids = True)
 
     valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, valid_person_ids = pre_processing_visits(valid_person_ids.toPandas(), valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both", return_person_ids = True)
     print("finish pre-processing!!!")
@@ -6284,7 +6286,7 @@ def produce_dataset(train_valid_split, Long_COVID_Silver_Standard, person_inform
     subset_valid_label_tensor_ls = [valid_label_tensor_ls[idx] for idx in valid_subset_ids]    
 
     subset_valid_dataset = LongCOVIDVisitsDataset2(subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max)
-    write_to_pickle([visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max], "train_data")
+    write_to_pickle([person_ids, visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, data_min, data_max], "train_data")
     write_to_pickle([valid_person_ids, valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls, data_min, data_max], "valid_data")
     
     write_to_pickle([subset_valid_visit_tensor_ls, subset_valid_mask_ls, subset_valid_time_step_ls, subset_valid_person_info_ls, subset_valid_label_tensor_ls, data_min, data_max], "subset_valid_data")
@@ -6303,7 +6305,7 @@ def produce_dataset_testing(person_information_testing, recent_visits_w_nlp_note
     test_person_info = person_information_testing
 
     print("start pre-processing!!!")
-    test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, test_label_tensor_ls, test_person_ids = pre_processing_visits(None, test_person_info.toPandas(), test_recent_visits.toPandas(), None, setup="both", return_person_ids = True)
+    test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, test_label_tensor_ls, test_person_ids = pre_processing_visits(None, test_person_info.toPandas(), test_recent_visits.toPandas(), None, setup="both", return_person_ids = True, start_col_id=4)
 
     # valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_tensor_ls = pre_processing_visits(valid_person_ids.toPandas(), valid_person_info.toPandas(), valid_recent_visits.toPandas(), valid_labels.toPandas(), setup="both")
     print("finish pre-processing!!!")
@@ -6311,6 +6313,7 @@ def produce_dataset_testing(person_information_testing, recent_visits_w_nlp_note
     non_empty_column_ids, data_min, data_max = read_from_pickle(produce_dataset, "train_data_statistics.pickle")
 
     # visit_tensor_ls, mask_ls, non_empty_column_ids = remove_empty_columns(visit_tensor_ls, mask_ls)
+    print("non empty column ids::", non_empty_column_ids)
     test_visit_tensor_ls, test_mask_ls = remove_empty_columns_with_non_empty_cls(test_visit_tensor_ls, test_mask_ls, non_empty_column_ids)
 
     # data_min, data_max = get_data_min_max(test_visit_tensor_ls, test_mask_ls)
@@ -6600,11 +6603,11 @@ def recent_visits_w_nlp_notes_2(recent_visits_2, person_nlp_symptom):
     recent_visits_2_testing=Input(rid="ri.foundry.main.dataset.da8e41a5-92ce-4bc6-be6c-ff808dec67c9")
 )
 def recent_visits_w_nlp_notes_2_testing(recent_visits_2_testing, person_nlp_symptom_testing):
-    person_nlp_symptom_testing = person_nlp_symptom_testing.join(recent_visits_2.select(["person_id", "six_month_before_last_visit"]).distinct(), on="person_id", how="left")
+    person_nlp_symptom_testing = person_nlp_symptom_testing.join(recent_visits_2_testing.select(["person_id", "six_month_before_last_visit"]).distinct(), on="person_id", how="left")
     person_nlp_symptom_testing = person_nlp_symptom_testing.where(person_nlp_symptom_testing["note_date"] >= person_nlp_symptom_testing["six_month_before_last_visit"])
     person_nlp_symptom_testing = person_nlp_symptom_testing.withColumnRenamed("note_date", "visit_date").drop(*["six_month_before_last_visit", "note_id", "visit_occurrence_id"])
     person_nlp_symptom_testing = person_nlp_symptom_testing.withColumn("has_nlp_note", lit(1.0))
-    df = recent_visits_2.join(person_nlp_symptom_testing, on = ["person_id", "visit_date"], how="left").orderBy(*["person_id", "visit_date"])#.fillna(0.0)
+    df = recent_visits_2_testing.join(person_nlp_symptom_testing, on = ["person_id", "visit_date"], how="left").orderBy(*["person_id", "visit_date"])#.fillna(0.0)
 
     # person_nlp_symptom_testing = person_nlp_symptom_testing.merge(recent_visits_2[["person_id", "six_month_before_last_visit"]].drop_duplicates(), on="person_id", how="left")
     # person_nlp_symptom_testing = person_nlp_symptom_testing.loc[person_nlp_symptom_testing["note_date"] >= person_nlp_symptom_testing["six_month_before_last_visit"]]
@@ -6617,7 +6620,7 @@ def recent_visits_w_nlp_notes_2_testing(recent_visits_2_testing, person_nlp_symp
     return df
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.bfe11b80-dcd4-4f4a-9d17-bec0433bedaa"),
+    Output(rid="ri.foundry.main.dataset.73261589-80e1-4205-a060-e1d6eeb83d55"),
     broad_related_concepts=Input(rid="ri.foundry.main.dataset.ce8c17fb-63cd-41bd-b9c8-9bf54e5091da"),
     concept_set_members=Input(rid="ri.foundry.main.dataset.e670c5ad-42ca-46a2-ae55-e917e3e161b6")
 )
@@ -6738,6 +6741,53 @@ def study_misclassified(train_test_model, procedure_occurrence, condition_occurr
     
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.c6673c1c-6c0c-4ff1-8b29-cc4c268e650a"),
+    produce_dataset_testing=Input(rid="ri.foundry.main.dataset.ca457d29-b952-4b66-afd9-01506158c1a0"),
+    train_sequential_model_3=Input(rid="ri.foundry.main.dataset.4fa4a34a-a9e7-489f-a499-023c2d4c44ac")
+)
+def test_mTan(train_sequential_model_3, produce_dataset_testing):
+    test_person_ids, test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, _, data_min, data_max = read_from_pickle(produce_dataset_testing, "test_data.pickle")
+
+    test_dataset = LongCOVIDVisitsDataset2(test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, None, data_min, data_max)
+
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=4, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    dim = test_dataset.__getitem__(1)[0].shape[-1]
+    latent_dim=20
+    rec_hidden=32
+    learn_emb=True
+    enc_num_heads=1
+    num_ref_points=128
+    gen_hidden=30
+    dec_num_heads=1
+    classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    device = torch.device(
+        'cuda' if torch.cuda.is_available() else 'cpu')
+    print("device::", device)
+    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    lr = 0.001
+
+    
+
+    rec = rec.to(device)
+    dec = dec.to(device)
+    classifier = classifier.to(device)
+
+    rec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_rec.pickle'))
+    dec.load_state_dict(read_model_from_pickle(train_sequential_model_3, 'mTans_dec.pickle'))
+    classifier.load_state_dict(read_model_from_pickle(train_sequential_model_3, "mTans_classifier.pickle"))
+
+    
+    test_pred_labels, pred_scores =  test_classifier(rec, test_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+
+    test_predictions = pd.DataFrame.from_dict({
+            'person_id': test_person_ids,
+            'mTans': pred_scores.reshape(-1).tolist()
+        }, orient='columns')
+
+    return test_predictions
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.133d515d-3a27-46b1-acbe-749a21a788e9"),
     condition_table_analysis=Input(rid="ri.foundry.main.dataset.bcbf4137-1508-42b5-bb05-631492b8d3b9"),
     device_table_analysis_1=Input(rid="ri.foundry.main.dataset.ffc3d120-eaa8-4a04-8bcb-69b6dcb16ad8"),
@@ -6756,7 +6806,7 @@ def top_concept_ids(condition_table_analysis, device_table_analysis_1, drug_tabl
     return r
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.b8403268-f3cc-4380-ba0b-2f153eccfe29"),
+    Output(rid="ri.foundry.main.dataset.e5cacf25-d71d-44ee-a3da-6bad8eaf53e8"),
     nlp_sym_analysis=Input(rid="ri.foundry.main.dataset.02f756f5-d406-4b23-9438-a2d5a5c17cd9")
 )
 def top_concept_names(nlp_sym_analysis):
