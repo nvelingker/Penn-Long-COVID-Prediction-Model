@@ -6794,7 +6794,7 @@ def test_mTan(train_sequential_model_3, produce_dataset_testing):
 
     test_predictions = pd.DataFrame.from_dict({
             'person_id': test_person_ids,
-            'mTans': pred_scores.reshape(-1).tolist()
+            'mTans_outcome': pred_scores.reshape(-1).tolist()
         }, orient='columns')
 
     return test_predictions
