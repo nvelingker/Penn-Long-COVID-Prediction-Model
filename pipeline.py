@@ -8905,7 +8905,7 @@ def valid_mTan(train_sequential_model_3, produce_dataset):
 )
 def validation_metrics( train_test_model, train_test_top_k_model, valid_mTan):
     train_test_top_k_model = train_test_top_k_model.drop("outcome", axis=1)
-    df = train_test_model.merge(train_test_top_k_model, on="person_id", how="left").merge(valid_mTan, on="person_id", how="left")
+    df = train_test_model.merge(train_test_top_k_model, on="person_id", how="left")#.merge(valid_mTan, on="person_id", how="left")
 
     outcomes = [i for i in df.columns if i.endswith("_outcome") and not "ens" in i and not "nn" in i]
     print(outcomes)
