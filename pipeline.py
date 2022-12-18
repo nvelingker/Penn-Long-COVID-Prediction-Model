@@ -1826,6 +1826,13 @@ def obtain_latent_sequence(observation, condition_occurrence, drug_exposure, pro
     return data
 
 @transform_pandas(
+    Output(rid="ri.foundry.main.dataset.a0c6118a-62cf-4a55-a8f7-b71205db55a2"),
+    validation_metrics=Input(rid="ri.foundry.main.dataset.def6f994-533b-46b8-95ab-3708d867119c")
+)
+def Penn_predictions(validation_metrics):
+     return validation_metrics.select(F.col("person_id"), F.col("all_ens_outcome").alias("prediction"))
+
+@transform_pandas(
     Output(rid="ri.foundry.main.dataset.8a16f982-ef2a-47bf-9cf9-5630e535e8b7"),
     add_date_diff_cols=Input(rid="ri.foundry.main.dataset.d3dc0e61-b976-406e-917b-a7e47c925333")
 )
@@ -8039,7 +8046,6 @@ def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary
     static_cols = ['person_id','total_visits', 'age']
 
     cols = static_cols + [col for col in all_patients_summary_fact_table_de_id.columns if 'indicator' in col]
-    print(len(cols))
     
     ## get outcome column
     Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
@@ -8842,13 +8848,6 @@ def train_valid_split( Long_COVID_Silver_Standard, num_recent_visits):
     split_person_ids_df = pd.DataFrame([[person_id, "train"] for person_id in train_person_ids] + [[person_id, "valid"] for person_id in valid_person_ids], columns=["person_id", "split"]).sort_values("person_id")
 
     return split_person_ids_df
-
-@transform_pandas(
-    Output(rid="ri.vector.main.execute.504db0bb-74b0-4ab8-addd-d2787cb6e555"),
-    validation_metrics=Input(rid="ri.foundry.main.dataset.def6f994-533b-46b8-95ab-3708d867119c")
-)
-def unnamed(validation_metrics):
-    
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.78717ca8-ae81-4a08-8df8-d3ec16e75f18"),
