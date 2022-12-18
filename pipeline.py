@@ -8825,7 +8825,7 @@ def valid_mTan(train_sequential_model_3, produce_dataset):
 
     valid_predictions = pd.DataFrame.from_dict({
             'person_id': valid_person_ids,
-            'mTans': pred_labels.tolist()
+            'mTans_outcome': pred_labels.tolist()
         }, orient='columns')
 
     return valid_predictions
