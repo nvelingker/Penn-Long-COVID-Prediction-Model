@@ -40,7 +40,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import classification_report,roc_auc_score,recall_score, precision_score, brier_score_loss, average_precision_score, mean_absolute_error
 from sklearn.decomposition import PCA
 #load train or test to test copies
-LOAD_TEST = 0
+LOAD_TEST = 1
 #turn merge_label to 0 before submission
 MERGE_LABEL = 1
 import torch
@@ -8972,13 +8972,17 @@ def valid_mTan(train_sequential_model_3, produce_dataset):
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.def6f994-533b-46b8-95ab-3708d867119c"),
+    test_mTan=Input(rid="ri.foundry.main.dataset.c6673c1c-6c0c-4ff1-8b29-cc4c268e650a"),
     train_test_model=Input(rid="ri.foundry.main.dataset.ea6c836a-9d51-4402-b1b7-0e30fb514fc8"),
     train_test_top_k_model=Input(rid="ri.foundry.main.dataset.2b8fbb2f-c6a4-4402-bcbc-b0925e8e1003"),
     valid_mTan=Input(rid="ri.foundry.main.dataset.78717ca8-ae81-4a08-8df8-d3ec16e75f18")
 )
-def validation_metrics( train_test_model, train_test_top_k_model, valid_mTan):
+def validation_metrics( train_test_model, train_test_top_k_model, valid_mTan, test_mTan):
     train_test_top_k_model = train_test_top_k_model.drop("outcome", axis=1)
-    df = train_test_model.merge(train_test_top_k_model, on="person_id", how="left").merge(valid_mTan, on="person_id", how="left")
+    if not LOAD_TEST:
+        df = train_test_model.merge(train_test_top_k_model, on="person_id", how="left").merge(valid_mTan, on="person_id", how="left")
+    else:
+        df = train_test_model.merge(train_test_top_k_model, on="person_id", how="left").merge(test_mTan, on="person_id", how="left")
 
     outcomes = [i for i in df.columns if i.endswith("_outcome") and not "ens" in i and not "nn" in i]
     print(outcomes)
