@@ -1127,6 +1127,73 @@ def evaluate_classifier(model, test_loader, dec=None, latent_dim=None, classify_
     print("validation classification Report:\n{}".format(classification_report(true.astype(int), pred_labels)))
     return test_loss/pred.shape[0], acc, auc, recall, precision, true, pred_labels
 
+def evaluate_classifier_final(model, test_loader, dec=None, latent_dim=None, classify_pertp=True, classifier=None,dim=41, device='cuda', reconst=False, num_sample=1):
+    pred = []
+    true = []
+    test_loss = 0
+    for item in test_loader:
+        test_batch, label, person_info_batch = item
+        # train_batch, label, person_info_batch = item
+        if person_info_batch is not None:
+            test_batch, label, person_info_batch = test_batch.float().to(device), label.to(device), person_info_batch.float().to(device)
+        else:
+            test_batch, label = test_batch.float().to(device), label.to(device)
+        batch_len = test_batch.shape[0]
+        observed_data, observed_mask, observed_tp \
+            = test_batch[:, :, :dim], test_batch[:, :, dim:2*dim], test_batch[:, :, -1]
+        # observed_data = observed_data.float()
+        # observed_mask = observed_mask.float()
+        # observed_tp = observed_tp.float()
+        with torch.no_grad():
+            out = model(
+                torch.cat((observed_data, observed_mask), 2), observed_tp)
+            if reconst:
+                qz0_mean, qz0_logvar = out[:, :,
+                                           :latent_dim], out[:, :, latent_dim:]
+                epsilon = torch.randn(
+                    num_sample, qz0_mean.shape[0], qz0_mean.shape[1], qz0_mean.shape[2]).to(device)
+                z0 = epsilon * torch.exp(.5 * qz0_logvar) + qz0_mean
+                z0 = z0.view(-1, qz0_mean.shape[1], qz0_mean.shape[2])
+                if classify_pertp:
+                    pred_x = dec(z0, observed_tp[None, :, :].repeat(
+                        num_sample, 1, 1).view(-1, observed_tp.shape[1]))
+                    #pred_x = pred_x.view(num_sample, batch_len, pred_x.shape[1], pred_x.shape[2])
+                    out = classifier(pred_x, person_info_batch)
+                else:
+                    out = classifier(z0, person_info_batch)
+            if classify_pertp:
+                N = label.size(-1)
+                out = out.view(-1, N)
+                label = label.view(-1, N)
+                _, label = label.max(-1)
+                test_loss += nn.CrossEntropyLoss()(out, label.long()).item() * batch_len * 50.
+            else:
+                label = label.unsqueeze(0).repeat_interleave(
+                    num_sample, 0).view(-1)
+                test_loss += nn.CrossEntropyLoss()(out, label.long()).item() * batch_len * num_sample
+        pred.append(out.cpu())
+        true.append(label.cpu())
+
+    
+    pred = torch.cat(pred, 0)
+    true = torch.cat(true, 0)
+    pred_scores = torch.sigmoid(pred[:, 1])
+
+    pred = pred.numpy()
+    true = true.numpy()
+    pred_scores = pred_scores.numpy()
+    print("True labels::", true.reshape(-1))
+    print("Predicated labels::", pred_scores.reshape(-1))
+    acc = np.mean(pred.argmax(1) == true)
+    auc = roc_auc_score(
+        true, pred_scores) if not classify_pertp else 0.
+    true = true.reshape(-1)
+    pred_labels = (pred_scores > 0.5).reshape(-1).astype(int)
+    recall = recall_score(true.astype(int), pred_labels)
+    precision = precision_score(true.astype(int), pred_labels)
+    print("validation classification Report:\n{}".format(classification_report(true.astype(int), pred_labels)))
+    return test_loss/pred.shape[0], acc, auc, recall, precision, true, pred_labels, pred_scores.reshape(-1)
+
 def test_classifier(model, test_loader, dec=None, latent_dim=None, classify_pertp=True, classifier=None,dim=41, device='cuda', reconst=False, num_sample=1):
     pred = []
     true = []
