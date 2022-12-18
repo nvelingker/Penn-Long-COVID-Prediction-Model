@@ -5882,7 +5882,7 @@ def observation_testing_copy(observation_testing, observation):
     validation_metrics=Input(rid="ri.foundry.main.dataset.def6f994-533b-46b8-95ab-3708d867119c")
 )
 def penn_predictions(validation_metrics):
-     return validation_metrics.select(F.col("person_id"), F.col("all_ens_outcome").alias("prediction"))
+     return validation_metrics.select(F.col("person_id"), F.col("all_ens_outcome").alias("penn_prediction"))
 
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.2f6ebf73-3a2d-43dc-ace9-da56da4b1743"),
