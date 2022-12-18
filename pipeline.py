@@ -8918,7 +8918,7 @@ def train_valid_split( Long_COVID_Silver_Standard, num_recent_visits):
 )
 def valid_mTan(train_sequential_model_3, produce_dataset):
     valid_person_ids, valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_ls, data_min, data_max = read_from_pickle(produce_dataset, "valid_data.pickle")
-    person_ids, visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_ls, _,_ = read_from_pickle(produce_dataset, "valid_data.pickle")
+    person_ids, visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_ls, _,_ = read_from_pickle(produce_dataset, "train_data.pickle")
 
     valid_dataset = LongCOVIDVisitsDataset2(valid_visit_tensor_ls, valid_mask_ls, valid_time_step_ls, valid_person_info_ls, valid_label_ls, data_min, data_max)
     train_dataset = LongCOVIDVisitsDataset2(visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_ls, data_min, data_max)
