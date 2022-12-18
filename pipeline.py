@@ -8037,9 +8037,9 @@ def train_sequential_model_rebalance(train_sequential_model_3, produce_dataset):
 def train_test_model(all_patients_summary_fact_table_de_id, all_patients_summary_fact_table_de_id_testing, Long_COVID_Silver_Standard):
     
     static_cols = ['person_id','total_visits', 'age']
-    print(len(static_cols-1))
 
     cols = static_cols + [col for col in all_patients_summary_fact_table_de_id.columns if 'indicator' in col]
+    print(len(cols))
     
     ## get outcome column
     Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
