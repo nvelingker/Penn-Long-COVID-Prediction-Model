@@ -1116,6 +1116,73 @@ def evaluate_classifier(model, test_loader, dec=None, latent_dim=None, classify_
     print("validation classification Report:\n{}".format(classification_report(true.astype(int), pred_labels)))
     return test_loss/pred.shape[0], acc, auc, recall, precision, true, pred_labels
 
+def evaluate_classifier_final(model, test_loader, dec=None, latent_dim=None, classify_pertp=True, classifier=None,dim=41, device='cuda', reconst=False, num_sample=1):
+    pred = []
+    true = []
+    test_loss = 0
+    for item in test_loader:
+        test_batch, label, person_info_batch = item
+        # train_batch, label, person_info_batch = item
+        if person_info_batch is not None:
+            test_batch, label, person_info_batch = test_batch.float().to(device), label.to(device), person_info_batch.float().to(device)
+        else:
+            test_batch, label = test_batch.float().to(device), label.to(device)
+        batch_len = test_batch.shape[0]
+        observed_data, observed_mask, observed_tp \
+            = test_batch[:, :, :dim], test_batch[:, :, dim:2*dim], test_batch[:, :, -1]
+        # observed_data = observed_data.float()
+        # observed_mask = observed_mask.float()
+        # observed_tp = observed_tp.float()
+        with torch.no_grad():
+            out = model(
+                torch.cat((observed_data, observed_mask), 2), observed_tp)
+            if reconst:
+                qz0_mean, qz0_logvar = out[:, :,
+                                           :latent_dim], out[:, :, latent_dim:]
+                epsilon = torch.randn(
+                    num_sample, qz0_mean.shape[0], qz0_mean.shape[1], qz0_mean.shape[2]).to(device)
+                z0 = epsilon * torch.exp(.5 * qz0_logvar) + qz0_mean
+                z0 = z0.view(-1, qz0_mean.shape[1], qz0_mean.shape[2])
+                if classify_pertp:
+                    pred_x = dec(z0, observed_tp[None, :, :].repeat(
+                        num_sample, 1, 1).view(-1, observed_tp.shape[1]))
+                    #pred_x = pred_x.view(num_sample, batch_len, pred_x.shape[1], pred_x.shape[2])
+                    out = classifier(pred_x, person_info_batch)
+                else:
+                    out = classifier(z0, person_info_batch)
+            if classify_pertp:
+                N = label.size(-1)
+                out = out.view(-1, N)
+                label = label.view(-1, N)
+                _, label = label.max(-1)
+                test_loss += nn.CrossEntropyLoss()(out, label.long()).item() * batch_len * 50.
+            else:
+                label = label.unsqueeze(0).repeat_interleave(
+                    num_sample, 0).view(-1)
+                test_loss += nn.CrossEntropyLoss()(out, label.long()).item() * batch_len * num_sample
+        pred.append(out.cpu())
+        true.append(label.cpu())
+
+    
+    pred = torch.cat(pred, 0)
+    true = torch.cat(true, 0)
+    pred_scores = torch.sigmoid(pred[:, 1])
+
+    pred = pred.numpy()
+    true = true.numpy()
+    pred_scores = pred_scores.numpy()
+    print("True labels::", true.reshape(-1))
+    print("Predicated labels::", pred_scores.reshape(-1))
+    acc = np.mean(pred.argmax(1) == true)
+    auc = roc_auc_score(
+        true, pred_scores) if not classify_pertp else 0.
+    true = true.reshape(-1)
+    pred_labels = (pred_scores > 0.5).reshape(-1).astype(int)
+    recall = recall_score(true.astype(int), pred_labels)
+    precision = precision_score(true.astype(int), pred_labels)
+    print("validation classification Report:\n{}".format(classification_report(true.astype(int), pred_labels)))
+    return test_loss/pred.shape[0], acc, auc, recall, precision, true, pred_labels, pred_scores.reshape(-1)
+
 def test_classifier(model, test_loader, dec=None, latent_dim=None, classify_pertp=True, classifier=None,dim=41, device='cuda', reconst=False, num_sample=1):
     pred = []
     true = []
@@ -8815,7 +8882,7 @@ def valid_mTan(train_sequential_model_3, produce_dataset):
 
     
     # valid_pred_labels =  evaluate_classifier(rec, valid_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
-    val_loss, val_acc, val_auc, val_recall, val_precision,true, pred_labels = evaluate_classifier(rec, valid_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+    val_loss, val_acc, val_auc, val_recall, val_precision,true, pred_labels, pred_scores = evaluate_classifier_final(rec, valid_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
 
     print("validation loss::", val_loss)
     print("validation accuracy::", val_acc)
@@ -8825,7 +8892,7 @@ def valid_mTan(train_sequential_model_3, produce_dataset):
 
     valid_predictions = pd.DataFrame.from_dict({
             'person_id': valid_person_ids,
-            'mTans_outcome': pred_labels.tolist()
+            'mTans_outcome': pred_scores.tolist()
         }, orient='columns')
 
     return valid_predictions
@@ -8833,16 +8900,17 @@ def valid_mTan(train_sequential_model_3, produce_dataset):
 @transform_pandas(
     Output(rid="ri.foundry.main.dataset.def6f994-533b-46b8-95ab-3708d867119c"),
     train_test_model=Input(rid="ri.foundry.main.dataset.ea6c836a-9d51-4402-b1b7-0e30fb514fc8"),
-    train_test_top_k_model=Input(rid="ri.foundry.main.dataset.2b8fbb2f-c6a4-4402-bcbc-b0925e8e1003")
+    train_test_top_k_model=Input(rid="ri.foundry.main.dataset.2b8fbb2f-c6a4-4402-bcbc-b0925e8e1003"),
+    valid_mTan=Input(rid="ri.foundry.main.dataset.78717ca8-ae81-4a08-8df8-d3ec16e75f18")
 )
-def validation_metrics( train_test_model, train_test_top_k_model):
+def validation_metrics( train_test_model, train_test_top_k_model, valid_mTan):
     train_test_top_k_model = train_test_top_k_model.drop("outcome", axis=1)
-    df = train_test_model.merge(train_test_top_k_model, on="person_id", how="left")
+    df = train_test_model.merge(train_test_top_k_model, on="person_id", how="left").merge(valid_mTan, on="person_id", how="left")
 
-    outcomes = [i for i in df.columns if i.endswith("_outcome") and not "ens" in i and not "nn" in i]
+    outcomes = [i for i in df.columns if i.endswith("_outcome") and not "ens" in i and not "nn" in i and not "mTan" in i]
     print(outcomes)
     df['all_ens_outcome'] = df.apply(lambda row: 1 if sum([row[c] for c in outcomes])/len(outcomes) >=0.5 else 0, axis=1)
-    
+    df['all_ens_outcome'] = df.apply(lambda row: (row["mTans_outcome"] + row["all_ens_outcome"])/2, axis=1)
     for i in [i for i in df.columns if i != "person_id"]:
         print("{} Classification Report:\n{}".format(i, classification_report(df["outcome"], np.where(df[i] > 0.5, 1, 0))))
         print(i, " MAE:", mean_absolute_error(df['outcome'], np.where(df[i] > 0.5, 1, 0)))
@@ -8851,29 +8919,5 @@ def validation_metrics( train_test_model, train_test_top_k_model):
         print(i, " ROC AUC:", roc_auc_score(df['outcome'], df[i]))
         print("-"*10)
 
-    # print("RF MAE:", mean_absolute_error(df['outcome'], np.where(df["rf_outcome"] > 0.5, 1, 0)))
-    # print("RF Brier score:", brier_score_loss(df['outcome'], df["rf_outcome"]))
-    # print("RF AP:", average_precision_score(df['outcome'], df["rf_outcome"]))
-    # print("RF ROC AUC:", roc_auc_score(df['outcome'], df["rf_outcome"]))
-    # print("-"*10)
-
-    # print("GBC MAE:", mean_absolute_error(df['outcome'], np.where(df["gb_outcome"] > 0.5, 1, 0)))
-    # print("GBC Brier score:", brier_score_loss(df['outcome'], df["gb_outcome"]))
-    # print("GBC AP:", average_precision_score(df['outcome'], df["gb_outcome"]))
-    # print("GBC ROC AUC:", roc_auc_score(df['outcome'], df["gb_outcome"]))
-    # print("-"*10)
-
-    # print("NN MAE:", mean_absolute_error(df['outcome'], np.where(df["nn_outcome"] > 0.5, 1, 0)))
-    # print("NN Brier score:", brier_score_loss(df['outcome'], df["nn_outcome"]))
-    # print("NN AP:", average_precision_score(df['outcome'], df["nn_outcome"]))
-    # print("NN ROC AUC:", roc_auc_score(df['outcome'], df["nn_outcome"]))
-    # print("-"*10)
-
-    # print("ENS MAE:", mean_absolute_error(df['outcome'], np.where(df["ens_outcome"] > 0.5, 1, 0)))
-    # print("ENS Brier score:", brier_score_loss(df['outcome'], df["ens_outcome"]))
-    # print("ENS AP:", average_precision_score(df['outcome'], df["ens_outcome"]))
-    # print("ENS ROC AUC:", roc_auc_score(df['outcome'], df["ens_outcome"]))
-    # print("-"*10)
-
-    # return df
+    return df
 
