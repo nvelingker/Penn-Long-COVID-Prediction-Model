@@ -6190,37 +6190,6 @@ def top_k_concepts_data_test(device_exposure_testing_copy, procedure_occurrence_
     
 
 @transform_pandas(
-    Output(rid="ri.foundry.main.dataset.9b948015-110d-418f-8da7-794e5b4a8278"),
-    condition_occurrence=Input(rid="ri.foundry.main.dataset.2f496793-6a4e-4bf4-b0fc-596b277fb7e2"),
-    device_exposure=Input(rid="ri.foundry.main.dataset.c1fd6d67-fc80-4747-89ca-8eb04efcb874"),
-    drug_exposure=Input(rid="ri.foundry.main.dataset.469b3181-6336-4d0e-8c11-5e33a99876b5"),
-    everyone_cohort_de_id=Input(rid="ri.foundry.main.dataset.120adc97-2986-4b7d-9f96-42d8b5d5bedf"),
-    measurement=Input(rid="ri.foundry.main.dataset.5c8b84fb-814b-4ee5-a89a-9525f4a617c7"),
-    observation=Input(rid="ri.foundry.main.dataset.f9d8b08e-3c9f-4292-b603-f1bfa4336516"),
-    procedure_occurrence=Input(rid="ri.foundry.main.dataset.9a13eb06-de7d-482b-8f91-fb8c144269e3")
-)
-def top_k_to_k2_concepts_data_copied(observation, condition_occurrence, drug_exposure, procedure_occurrence, measurement, device_exposure, everyone_cohort_de_id):
-    tables = {procedure_occurrence:("procedure_concept_id",500),condition_occurrence:("condition_concept_id",500), drug_exposure:("drug_concept_id",500), observation:("observation_concept_id",500), measurement:("measurement_concept_id",500), device_exposure:("device_concept_id",500)}
-
-    feats = everyone_cohort_de_id.select(F.col("person_id"))
-    for TABLE, (CONCEPT_ID_COL,k) in tables.items():
-        TABLE = TABLE.select(F.col("person_id"), F.col(CONCEPT_ID_COL))                 
-        distinct = TABLE.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).limit(k).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
-        df = TABLE.filter(~F.col(CONCEPT_ID_COL).isin(distinct))
-        distinct = df.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).limit(k).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
-        df= df.groupBy("person_id").pivot(CONCEPT_ID_COL).agg(F.lit(1)).na.fill(0)
-        df = df.select([F.col(c).alias(CONCEPT_ID_COL[:3]+c) if c != "person_id" else c for c in df.columns ])
-        feats = feats.join(df, how="left",on="person_id")
-    data = feats.na.fill(0)
-    
-    return data
-    
-        
-    
-
-    
-
-@transform_pandas(
     Output(rid="ri.foundry.main.dataset.0d79b493-848a-4b79-bcb3-923bf5a3b366"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
     top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
