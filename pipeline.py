@@ -5109,48 +5109,6 @@ def lr2_hp_tuning(all_patients_summary_fact_table_de_id, Long_COVID_Silver_Stand
     return predictions
 
 @transform_pandas(
-    Output(rid="ri.vector.main.execute.5f501591-3819-462a-bfad-9ead2eaf6581"),
-    top_k_concepts_data=Input(rid="ri.foundry.main.dataset.7b277d99-e39e-4a5f-9058-4e6f65fa7f58")
-)
-def lr2_hp_tuning_copied(obs_latent):
-    X = obs_latent.drop("outcome", axis=1)
-    y = obs_latent.loc[:,"outcome"]
-
-    X_train_no_ind, X_test_no_ind, y_train, y_test = train_test_split(X, y, train_size=0.9, random_state=1)
-    X_train, X_test = X_train_no_ind.set_index("person_id"), X_test_no_ind.set_index("person_id")
-
-    model = LogisticRegression()
-    C = [0.001, 0.01, 0.1, 1,10]
-    fit_intercept = [False,True]
-    solver = ['lbfgs', 'liblinear', 'newton-cg']
-    class_weight=['balanced']
-    grid = dict(C=C,fit_intercept=fit_intercept,solver=solver,class_weight=class_weight)
-
-    cvFold = RepeatedKFold(n_splits=5, n_repeats=3, random_state=1)
-    randomSearch = RandomizedSearchCV(estimator=model, n_iter=15, n_jobs=-1, cv=cvFold, param_distributions=grid,refit=True, scoring='f1').fit(X,y)
-    params=randomSearch.best_estimator_.get_params()
-    print("All params: \n", params)
-
-    new_model = LogisticRegression(**params).fit(X_train,y_train)
-
-    test_preds = new_model.predict_proba(X_test)[:, 1]
-    
-    predictions = pd.DataFrame.from_dict({
-        'person_id': X_test_no_ind["person_id"],
-        'pred_outcome': test_preds.tolist(),
-        'outcome': y_test
-    }, orient='columns')
-
-    print("Classification Report:\n{}".format(classification_report(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0))))
-
-    print("MAE:", mean_absolute_error(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
-    print("Brier score:", brier_score_loss(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
-    print("AP:", average_precision_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
-    print("ROC AUC:", roc_auc_score(predictions['outcome'], np.where(predictions['pred_outcome'] > 0.5, 1, 0)))
-
-    return predictions
-
-@transform_pandas(
     Output(rid="ri.foundry.main.dataset.9832b19b-275e-4ac2-bef3-bb57c4287692"),
     Long_COVID_Silver_Standard=Input(rid="ri.foundry.main.dataset.3ea1038c-e278-4b0e-8300-db37d3505671"),
     all_patients_summary_fact_table_de_id=Input(rid="ri.foundry.main.dataset.324a6115-7c17-4d4d-94da-a2df11a87fa6")
