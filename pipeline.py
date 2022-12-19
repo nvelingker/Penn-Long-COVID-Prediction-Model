@@ -9010,7 +9010,7 @@ def validation_metrics( train_test_model, train_test_top_k_model, valid_mTan, te
         for i in [i for i in df.columns if i != "person_id"]:
             print("{} Classification Report:\n{}".format(i, classification_report(df["outcome"], np.where(df[i] > 0.5, 1, 0))))
             print(i, " MAE:", mean_absolute_error(df['outcome'], np.where(df[i] > 0.5, 1, 0)))
-            print(i, " Brier score:", brier_score_loss(df['outcome'], df[i]))
+            # print(i, " Brier score:", brier_score_loss(df['outcome'], df[i]))
             print(i, " AP:", average_precision_score(df['outcome'], df[i]))
             print(i, " ROC AUC:", roc_auc_score(df['outcome'], df[i]))
             print("-"*10)
