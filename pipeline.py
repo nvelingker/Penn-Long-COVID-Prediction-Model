@@ -44,10 +44,10 @@ LOAD_TEST = 1
 #turn merge_label to 0 before submission
 MERGE_LABEL = 0
 
-# #load train or test to test copies
-# LOAD_TEST = 0
-# #turn merge_label to 0 before submission
-# MERGE_LABEL = 1
+#load train or test to test copies
+LOAD_TEST = 0
+#turn merge_label to 0 before submission
+MERGE_LABEL = 1
 
 import torch
 import torch.nn as nn
