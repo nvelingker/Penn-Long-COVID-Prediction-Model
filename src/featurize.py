@@ -1,9 +1,8 @@
-from global_code import *
-
-
+from src.global_code import *
+from src.utils import *
 def custom_concept_set_members(concept_set_members):
     df = concept_set_members
-    max_codeset_id = df.agg({"codeset_id":"max"}).collect()[0][0]
+    max_codeset_id = int(df.agg({"codeset_id":"max"}).collect()[0][0])
     more = df.limit(1).toPandas()
     #concept_id, concept_name, concept_set_name (all other fields will be autoassigned)
     #ADD NEW SETS HERE
@@ -71,6 +70,7 @@ def custom_concept_set_members(concept_set_members):
         ["1567198","insulin aspart, human", "insulin_penn"],
         ["739138", "sertraline", "sertraline_penn"]
     ]
+    data = [[int(r[0]), r[1], r[2]] for r in data]
     #
     #codeset_id, concept_id, concept_set_name, is_most_recent (true),version (1), concept_name, archived (false)
     new_sets = {}
@@ -80,12 +80,12 @@ def custom_concept_set_members(concept_set_members):
             new_sets[concept_set_name] = max_codeset_id
         more.loc[len(more.index)] = [new_sets[concept_set_name], concept_id, concept_set_name, True, 1, concept_name, False]
     more = more.iloc[1: , :]
-    spark = SparkSession.builder.master("local[1]").appName("Penn").getOrCreate()
-    more = spark.createDataFrame(more)
+    spark = SparkSession.builder.master("local[1]").getOrCreate()
+    more = spark.createDataFrame(more, df.schema)
     mems = more.union(df)
     return mems
 
-def everyone_cohort_de_id( person, location, manifest_safe_harbor, microvisits_to_macrovisits, custom_concept_set_members):
+def everyone_cohort_de_id( person, microvisits_to_macrovisits, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
         
     """
@@ -96,28 +96,17 @@ def everyone_cohort_de_id( person, location, manifest_safe_harbor, microvisits_t
 
     concepts_df = concept_set_members
     
-    person_sample = person \
-        .select('person_id','year_of_birth','month_of_birth','day_of_birth','ethnicity_concept_name','race_concept_name','gender_concept_name','location_id','data_partner_id') \
+    df = person \
+        .select('person_id','year_of_birth','month_of_birth','day_of_birth','ethnicity_concept_name','race_concept_name','gender_concept_name','data_partner_id') \
         .distinct() \
         .sample(False, proportion_of_patients_to_use, 111)
 
     visits_df = microvisits_to_macrovisits.select("person_id", "macrovisit_start_date", "visit_start_date")
 
-    manifest_df = manifest_safe_harbor \
-        .select('data_partner_id','run_date','cdm_name','cdm_version','shift_date_yn','max_num_shift_days') \
-        .withColumnRenamed("run_date", "data_extraction_date")
 
-    location_df = location \
-        .dropDuplicates(subset=['location_id']) \
-        .select('location_id','city','state','zip','county') \
-        .withColumnRenamed('zip','postal_code')   
     
-    #join in location_df data to person_sample dataframe 
-    df = person_sample.join(location_df, 'location_id', 'left')
+    #join in location_df data to person_sample dataframe
 
-    #join in manifest_df information
-    df = df.join(manifest_df, 'data_partner_id','inner')
-    df = df.withColumn('max_num_shift_days', F.when(F.col('max_num_shift_days')=="", F.lit('0')).otherwise(F.regexp_replace(F.lower('max_num_shift_days'), 'na', '0')))
     
     #calculate date of birth for all patients
     df = df.withColumn("new_year_of_birth", F.when(F.col('year_of_birth').isNull(),1)
@@ -132,13 +121,10 @@ def everyone_cohort_de_id( person, location, manifest_safe_harbor, microvisits_t
     df = df.withColumn("date_of_birth", F.concat_ws("-", F.col("new_year_of_birth"), F.col("new_month_of_birth"), F.col("new_day_of_birth")))
     df = df.withColumn("date_of_birth", F.to_date("date_of_birth", format=None)) 
 
-    #convert date of birth string to date and apply min and max reasonable birthdate filter parameters, inclusive
-    max_shift_as_int = df.withColumn("shift_days_as_int", F.col('max_num_shift_days').cast(IntegerType())) \
-        .select(F.max('shift_days_as_int')) \
-        .head()[0]
+
 
     min_reasonable_dob = "1902-01-01"
-    max_reasonable_dob = F.date_add(F.current_date(), max_shift_as_int)
+    max_reasonable_dob = F.current_date()
 
     df = df.withColumn("date_of_birth", F.when(F.col('date_of_birth').between(min_reasonable_dob, max_reasonable_dob), F.col('date_of_birth')).otherwise(None))
 
@@ -191,25 +177,13 @@ def everyone_cohort_de_id( person, location, manifest_safe_harbor, microvisits_t
     df = df.join(visits_count, "person_id", "left")
     df = df.join(observation_period, "person_id", "left")
 
-    #LEVEL 2 ONLY
-    df = df.withColumn('max_num_shift_days', F.concat(F.col('max_num_shift_days'), F.lit(" + 180"))).withColumn('shift_date_yn', F.lit('Y'))
 
     df = df.select('person_id',
         'total_visits',
         'observation_period',
         'gender_concept_name',
-        'city',
-        'state',
-        'postal_code',
-        'county',
         'age',
-        'race_ethnicity',
-        'data_partner_id',
-        'data_extraction_date',
-        'cdm_name',
-        'cdm_version',
-        'shift_date_yn',
-        'max_num_shift_days')
+        'race_ethnicity')
 
     return df
 
@@ -731,4 +705,13 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     df = labs_df.join(BMI_df, on=['person_id', 'visit_date'], how='left').join(blood_oxygen_df, on=['person_id', 'visit_date'], how='left').join(blood_sodium_df, on=['person_id', 'visit_date'], how='left').join(blood_hemoglobin_df, on=['person_id', 'visit_date'], how='left').join(respiratory_rate_df, on=['person_id', 'visit_date'], how='left').join(blood_Creatinine_df, on=['person_id', 'visit_date'], how='left').join(blood_UreaNitrogen_df, on=['person_id', 'visit_date'], how='left').join(blood_Potassium_df, on=['person_id', 'visit_date'], how='left').join(blood_Chloride_df, on=['person_id', 'visit_date'], how='left').join(blood_Calcium_df, on=['person_id', 'visit_date'], how='left').join(MCV_df, on=['person_id', 'visit_date'], how='left').join(Erythrocytes_df, on=['person_id', 'visit_date'], how='left').join(MCHC_df, on=['person_id', 'visit_date'], how='left').join(Systolic_blood_pressure_df, on=['person_id', 'visit_date'], how='left').join(Diastolic_blood_pressure_df, on=['person_id', 'visit_date'], how='left').join(heart_rate_df, on=['person_id', 'visit_date'], how='left').join(temperature_df, on=['person_id', 'visit_date'], how='left').join(blood_Glucose_df, on=['person_id', 'visit_date'], how='left').join(blood_Platelets_df, on=['person_id', 'visit_date'], how='left').join(blood_Hematocrit_df, on=['person_id', 'visit_date'], how='left').join(blood_Leukocytes_df, on=['person_id', 'visit_date'], how='left').join(blood_Bilirubin_df, on=['person_id', 'visit_date'], how='left').join(blood_Albumin_df, on=['person_id', 'visit_date'], how='left').join(blood_Troponin_df, on=['person_id', 'visit_date'], how='left').join(blood_Procalcitonin_df, on=['person_id', 'visit_date'], how='left')
 
     return df
+
+
+
+def get_time_series_data(data_tables: dict, concept_tables:dict):
+    person = data_tables["person"]
+    micro_to_macro = data_tables["microvisits_to_macrovisits"]
+    concept_set_members = concept_tables["concept_set_members"]
+    custom_concept_set_members_table = custom_concept_set_members(concept_set_members)
+    everyone_cohort_de_id_table = everyone_cohort_de_id(person, micro_to_macro, custom_concept_set_members_table)
 
