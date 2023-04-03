@@ -347,4 +347,4 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
     
 
 def spark_to_pandas(df):
-    return df.to_pandas()
+    return df.to_pandas() 
