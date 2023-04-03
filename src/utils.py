@@ -1,7 +1,7 @@
 import pickle
 import torch
 import numpy as np
-
+import pyspark.pandas as ps
 
 def remove_empty_columns_with_non_empty_cls(values, masks, non_empty_column_ids):
 
@@ -344,3 +344,7 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
         return visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, all_person_ids
     else:
         return visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls
+    
+
+def spark_to_pandas(df):
+    return df.to_pandas()
