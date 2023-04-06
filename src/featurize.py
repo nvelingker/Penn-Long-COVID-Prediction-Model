@@ -97,11 +97,11 @@ def everyone_cohort_de_id( person, microvisits_to_macrovisits, custom_concept_se
     concepts_df = concept_set_members
     
     df = person \
-        .select('person_id','year_of_birth','month_of_birth','day_of_birth','ethnicity_concept_name','race_concept_name','gender_concept_name','data_partner_id') \
+        .select('person_id','year_of_birth','month_of_birth','day_of_birth') \
         .distinct() \
         .sample(False, proportion_of_patients_to_use, 111)
 
-    visits_df = microvisits_to_macrovisits.select("person_id", "macrovisit_start_date", "visit_start_date")
+    visits_df = microvisits_to_macrovisits.select("person_id", "visit_start_date")
 
 
     
@@ -139,24 +139,16 @@ def everyone_cohort_de_id( person, microvisits_to_macrovisits, custom_concept_se
     O = ['More than one race', 'Multiple race', 'Multiple races', 'Other', 'Other Race']
     U = ['Asian or Pacific Islander', 'No Information', 'No matching concept', 'Refuse to Answer', 'Unknown', 'Unknown racial group']
 
-    df = df.withColumn("race_ethnicity", F.when(F.col("ethnicity_concept_name") == 'Hispanic or Latino', "Hispanic or Latino Any Race")
-                        .when(F.col("race_concept_name").isin(H), "Hispanic or Latino Any Race")
-                        .when(F.col("race_concept_name").isin(A), "Asian Non-Hispanic")
-                        .when(F.col("race_concept_name").isin(B_AA), "Black or African American Non-Hispanic")
-                        .when(F.col("race_concept_name").isin(W), "White Non-Hispanic")
-                        .when(F.col("race_concept_name").isin(NH_PI), "Native Hawaiian or Other Pacific Islander Non-Hispanic") 
-                        .when(F.col("race_concept_name").isin(AI_AN), "American Indian or Alaska Native Non-Hispanic")
-                        .when(F.col("race_concept_name").isin(O), "Other Non-Hispanic")
-                        .when(F.col("race_concept_name").isin(U), "Unknown")
-                        .otherwise("Unknown"))
+
+
 
     #create visit counts/obs period dataframes
-    hosp_visits = visits_df.where(F.col("macrovisit_start_date").isNotNull()) \
+    hosp_visits = visits_df.where(F.col("visit_start_date").isNotNull()) \
         .orderBy("visit_start_date") \
         .coalesce(1) \
-        .dropDuplicates(["person_id", "macrovisit_start_date"]) #hospital
+        .dropDuplicates(["person_id", "visit_start_date"]) #hospital
 
-    non_hosp_visits = visits_df.where(F.col("macrovisit_start_date").isNull()) \
+    non_hosp_visits = visits_df.where(F.col("visit_start_date").isNull()) \
         .dropDuplicates(["person_id", "visit_start_date"]) #non-hospital
         
     visits_df = hosp_visits.union(non_hosp_visits) #join the two
@@ -181,9 +173,7 @@ def everyone_cohort_de_id( person, microvisits_to_macrovisits, custom_concept_se
     df = df.select('person_id',
         'total_visits',
         'observation_period',
-        'gender_concept_name',
-        'age',
-        'race_ethnicity')
+        'age',)
 
     return df
 
