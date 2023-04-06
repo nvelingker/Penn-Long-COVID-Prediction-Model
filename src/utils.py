@@ -2,7 +2,7 @@ import pickle
 import torch
 import numpy as np
 import pyspark.pandas as ps
-
+from pyspark.sql import SparkSession
 def remove_empty_columns_with_non_empty_cls(values, masks, non_empty_column_ids):
 
     # full_mask = 0
@@ -347,4 +347,9 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
     
 
 def spark_to_pandas(df):
-    return df.to_pandas() 
+    return df.to_pandas()
+
+def pandas_to_spark(df):
+    spark = SparkSession.builder \
+    .master("local[1]").config("spark.driver.memory", "500g").getOrCreate()
+    return spark.createDataFrame(df)

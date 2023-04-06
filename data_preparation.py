@@ -3,7 +3,7 @@ import os
 
 PERSON_TABLES = ["condition_occurrence", "death", "drug_exposure", "long_covid_silver_standard", "measurement", "microvisits_to_macrovisits", "observation_period", "observation", "person", "procedure_occurrence", "visit_occurrence"]
 CONCEPT_TABLES = ["concept","concept_set_members","LL_concept_sets_fusion_everyone","LL_DO_NOT_DELETE_REQUIRED_concept_sets_all"]
-SPARK = SparkSession.builder.appName('local[1]').getOrCreate()
+SPARK = SparkSession.builder.appName('local[1]').config("spark.driver.memory", "500g").getOrCreate()
 def __get_data(path, tables):
     return {table: SPARK.read.csv(path + table + ".csv", sep=',',
                          inferSchema=True, header=True) for table in tables}
