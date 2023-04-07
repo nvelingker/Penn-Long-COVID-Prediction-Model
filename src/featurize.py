@@ -1,5 +1,6 @@
 from src.global_code import *
 from src.utils import *
+from pyspark.sql.types import StringType
 def custom_concept_set_members(concept_set_members):
     df = concept_set_members
     max_codeset_id = int(df.agg({"codeset_id":"max"}).collect()[0][0])
@@ -1290,7 +1291,7 @@ def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, ev
     #     .drop("visit_occurrence_id")
 
     df = macrovisits_df.select('person_id','visit_start_date').withColumnRenamed('visit_start_date','visit_date')
-    #df = df.join(vaccines_df, on=list(set(df.columns)&set(vaccines_df.columns)), how='outer')
+    df = df.join(vaccines_df, on=list(set(df.columns)&set(vaccines_df.columns)), how='outer')
     df = df.join(procedures_df, on=list(set(df.columns)&set(procedures_df.columns)), how='outer')
     df = df.join(observations_df, on=list(set(df.columns)&set(observations_df.columns)), how='outer')
     df = df.join(conditions_df, on=list(set(df.columns)&set(conditions_df.columns)), how='outer')
@@ -1678,6 +1679,52 @@ pivot (
 
     return pivot_vax_person
 
+def all_patients_summary_fact_table_de_id(all_patients_visit_day_facts_table_de_id, everyone_cohort_de_id):
+
+    #deaths_df = everyone_patient_deaths.select('person_id','patient_death')
+    df = all_patients_visit_day_facts_table_de_id.drop('patient_death_at_visit', 'during_macrovisit_hospitalization')
+    
+    df2 = all_patients_visit_day_facts_table_de_id.select('person_id', 'visit_date', 'Oxygen_saturation').where(all_patients_visit_day_facts_table_de_id.Oxygen_saturation>0)    
+    
+    df3 = all_patients_visit_day_facts_table_de_id.select('person_id', 'visit_date', 'blood_sodium').where(all_patients_visit_day_facts_table_de_id.blood_sodium>0) 
+    
+    df4 = all_patients_visit_day_facts_table_de_id.select('person_id', 'visit_date', 'blood_hemoglobin').where(all_patients_visit_day_facts_table_de_id.blood_hemoglobin>0) 
+
+    df5 = all_patients_visit_day_facts_table_de_id.select('person_id', 'visit_date', 'blood_Creatinine').where(all_patients_visit_day_facts_table_de_id.blood_Creatinine>0)
+
+    df6 = all_patients_visit_day_facts_table_de_id.select('person_id', 'visit_date', 'blood_UreaNitrogen').where(all_patients_visit_day_facts_table_de_id.blood_UreaNitrogen>0)
+
+    df = df.groupby('person_id').agg(
+        F.max('BMI_rounded').alias('BMI_max_observed_or_calculated'),
+        F.avg('respiratory_rate').alias('respiratory_rate'),
+        *[F.max(col).alias(col + '_indicator') for col in df.columns if col not in ('person_id', 'BMI_rounded', 'visit_date', 'had_vaccine_administered', 'Oxygen_saturation', 'blood_sodium', 'blood_hemoglobin', 'respiratory_rate', 'blood_Creatinine', 'blood_UreaNitrogen')],
+        F.sum('had_vaccine_administered').alias('total_number_of_COVID_vaccine_doses'))
+    
+    # df2 = df2.groupby('person_id').agg(
+    #     F.min('Oxygen_saturation').alias('min_Oxygen_saturation'))
+    # df3 = df3.groupby('person_id').agg(
+    #     F.last('blood_sodium').alias('last_blood_sodium'))
+    # df4 = df4.groupby('person_id').agg(
+    #     F.last('blood_hemoglobin').alias('last_blood_hemoglobin'))
+    # df5 = df5.groupby('person_id').agg(
+    #     F.last('blood_Creatinine').alias('last_blood_Creatinine'))
+    # df6 = df6.groupby('person_id').agg(
+    #     F.last('blood_UreaNitrogen').alias('last_blood_UreaNitrogen'))
+    
+    # meas_df = df2.join(df3, on=['person_id'], how='left').join(df4, on=['person_id'], how='left').join(df5, on=['person_id'], how='left').join(df6, on=['person_id'], how='left')
+    
+    # df = df.join(meas_df, on=['person_id'], how='left')
+
+    df = everyone_cohort_de_id.join(df, 'person_id','left')
+
+    #final fill of null in non-continuous variables with 0
+    # df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_max_observed_or_calculated', 'postal_code', 'age')])
+    
+    df = df.distinct()
+
+
+    return df
+
 def get_time_series_data(data_tables: dict, concept_tables:dict):
     person_table = data_tables["person"]
     measurement_table = data_tables["measurement"]
@@ -1714,4 +1761,21 @@ def get_time_series_data(data_tables: dict, concept_tables:dict):
     everyone_vaccines_of_interest_table = everyone_vaccines_of_interest(everyone_cohort_de_id_table, Vaccine_fact_de_identified_table, first_covid_positive_table)
 
     all_patients_visit_day_facts_table_de_id_table = all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest_table, everyone_measurements_of_interest_table, everyone_procedures_of_interest_table, everyone_observations_of_interest_table, everyone_drugs_of_interest_table, micro_to_macro_table, everyone_vaccines_of_interest_table, None)
-    return all_patients_visit_day_facts_table_de_id_table
+    return everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table
+
+def get_static_from_time_series(everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table):
+    return all_patients_summary_fact_table_de_id(all_patients_visit_day_facts_table_de_id_table, everyone_cohort_de_id_table)
+
+def get_top_k_data(everyone_cohort_de_id_table, data_tables):
+    tables = {"procedure_occurrence":("procedure_concept_id",1000),"condition_occurrence":("condition_concept_id",1000), "drug_exposure":("drug_concept_id",1000), "observation":("observation_concept_id",1000), "measurement":("measurement_concept_id",1000)}
+    feats = everyone_cohort_de_id_table.select(F.col("person_id"))
+    for TABLE, (CONCEPT_ID_COL,k) in tables.items():
+        TABLE = data_tables[TABLE].select(F.col("person_id"), F.col(CONCEPT_ID_COL)).withColumn(CONCEPT_ID_COL, F.regexp_replace(F.col(CONCEPT_ID_COL).cast(StringType()), ".", ""))               
+        distinct = TABLE.groupBy(CONCEPT_ID_COL).count().orderBy("count", ascending=False).limit(k).select(F.col(CONCEPT_ID_COL)).toPandas()[CONCEPT_ID_COL].tolist()
+        df = TABLE.filter(F.col(CONCEPT_ID_COL).isin(distinct))
+        df= df.groupBy("person_id").pivot(CONCEPT_ID_COL).agg(F.lit(1)).na.fill(0)
+        df = df.select([F.col(c).alias(CONCEPT_ID_COL[:3]+str(c)) if c != "person_id" else c for c in df.columns ])
+        feats = feats.join(df, how="left",on="person_id")
+    data = feats.na.fill(0)
+    
+    return data
