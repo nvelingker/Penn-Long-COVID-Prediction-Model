@@ -1274,7 +1274,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
 
     return df
 
-def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, everyone_measurements_of_interest, everyone_procedures_of_interest, everyone_observations_of_interest, everyone_drugs_of_interest, microvisits_to_macrovisits, everyone_vaccines_of_interest, person_top_nlp_symptom):
+def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, everyone_measurements_of_interest, everyone_procedures_of_interest, everyone_observations_of_interest, everyone_drugs_of_interest,  microvisits_to_macrovisits, everyone_vaccines_of_interest, person_top_nlp_symptom):
 
     macrovisits_df = microvisits_to_macrovisits
     vaccines_df = everyone_vaccines_of_interest
@@ -1307,22 +1307,20 @@ def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, ev
     #create and join in flag that indicates whether the visit day was during a macrovisit (1) or not (0)
     #any conditions, observations, procedures, devices, drugs, measurements, and/or death flagged 
     #with a (1) on that particular visit date would then be considered to have happened during a macrovisit
-    macrovisits_df = macrovisits_df \
-        .select('person_id', 'visit_start_date', 'visit_end_date') \
-        .where(F.col('visit_start_date').isNotNull() & F.col('visit_end_date').isNotNull()) \
-        .distinct()
-    df_hosp = df.select('person_id', 'visit_date').join(macrovisits_df, on=['person_id'], how= 'outer')
-    df_hosp = df_hosp.withColumn('during_visit_hospitalization', F.when((F.datediff("visit_end_date","visit_date")>=0) & (F.datediff("visit_start_date","visit_date")<=0), 1).otherwise(0)) \
-        .drop('visit_start_date', 'visit_end_date') \
-        .where(F.col('during_visit_hospitalization') == 1) \
-        .distinct()
-    df = df.join(df_hosp, on=['person_id','visit_date'], how="left")   
+    # macrovisits_df = macrovisits_df \
+    #     .select('person_id', 'macrovisit_start_date', 'macrovisit_end_date') \
+    #     .where(F.col('macrovisit_start_date').isNotNull() & F.col('macrovisit_end_date').isNotNull()) \
+    #     .distinct()
+    # df_hosp = df.select('person_id', 'visit_date').join(macrovisits_df, on=['person_id'], how= 'outer')
+    # df_hosp = df_hosp.withColumn('during_macrovisit_hospitalization', F.when((F.datediff("macrovisit_end_date","visit_date")>=0) & (F.datediff("macrovisit_start_date","visit_date")<=0), 1).otherwise(0)) \
+    #     .drop('macrovisit_start_date', 'macrovisit_end_date') \
+    #     .where(F.col('during_macrovisit_hospitalization') == 1) \
+    #     .distinct()
+    # df = df.join(df_hosp, on=['person_id','visit_date'], how="left")   
 
     #final fill of null in non-continuous variables with 0
     # df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
 
-    for col in sorted(df.columns):
-        print(col)
 
     return df
 
@@ -1350,4 +1348,5 @@ def get_time_series_data(data_tables: dict, concept_tables:dict):
     everyone_drugs_of_interest_table = everyone_drugs_of_interest(drug_exposure_table, everyone_cohort_de_id_table, customized_concept_set_input_table, custom_concept_set_members_table)
     everyone_measurements_of_interest_table = everyone_measurements_of_interest(measurement_table, everyone_cohort_de_id_table, custom_concept_set_members_table)
     all_patients_visit_day_facts_table_de_id_table = all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest_table, everyone_measurements_of_interest_table, everyone_procedures_of_interest_table, everyone_observations_of_interest_table, everyone_drugs_of_interest_table, micro_to_macro_table, None, None)
-    
+    print(all_patients_visit_day_facts_table_de_id_table.count())
+    print(len(all_patients_visit_day_facts_table_de_id_table.columns))
