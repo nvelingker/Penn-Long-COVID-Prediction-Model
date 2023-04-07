@@ -1348,5 +1348,4 @@ def get_time_series_data(data_tables: dict, concept_tables:dict):
     everyone_drugs_of_interest_table = everyone_drugs_of_interest(drug_exposure_table, everyone_cohort_de_id_table, customized_concept_set_input_table, custom_concept_set_members_table)
     everyone_measurements_of_interest_table = everyone_measurements_of_interest(measurement_table, everyone_cohort_de_id_table, custom_concept_set_members_table)
     all_patients_visit_day_facts_table_de_id_table = all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest_table, everyone_measurements_of_interest_table, everyone_procedures_of_interest_table, everyone_observations_of_interest_table, everyone_drugs_of_interest_table, micro_to_macro_table, None, None)
-    print(all_patients_visit_day_facts_table_de_id_table.count())
-    print(len(all_patients_visit_day_facts_table_de_id_table.columns))
+    return all_patients_visit_day_facts_table_de_id_table
