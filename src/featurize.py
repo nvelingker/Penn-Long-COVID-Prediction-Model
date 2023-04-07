@@ -1307,19 +1307,19 @@ def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, ev
     #create and join in flag that indicates whether the visit day was during a macrovisit (1) or not (0)
     #any conditions, observations, procedures, devices, drugs, measurements, and/or death flagged 
     #with a (1) on that particular visit date would then be considered to have happened during a macrovisit
-    # macrovisits_df = macrovisits_df \
-    #     .select('person_id', 'macrovisit_start_date', 'macrovisit_end_date') \
-    #     .where(F.col('macrovisit_start_date').isNotNull() & F.col('macrovisit_end_date').isNotNull()) \
-    #     .distinct()
-    # df_hosp = df.select('person_id', 'visit_date').join(macrovisits_df, on=['person_id'], how= 'outer')
-    # df_hosp = df_hosp.withColumn('during_macrovisit_hospitalization', F.when((F.datediff("macrovisit_end_date","visit_date")>=0) & (F.datediff("macrovisit_start_date","visit_date")<=0), 1).otherwise(0)) \
-    #     .drop('macrovisit_start_date', 'macrovisit_end_date') \
-    #     .where(F.col('during_macrovisit_hospitalization') == 1) \
-    #     .distinct()
-    # df = df.join(df_hosp, on=['person_id','visit_date'], how="left")   
+    macrovisits_df = macrovisits_df \
+        .select('person_id', 'macrovisit_start_date', 'macrovisit_end_date') \
+        .where(F.col('macrovisit_start_date').isNotNull() & F.col('macrovisit_end_date').isNotNull()) \
+        .distinct()
+    df_hosp = df.select('person_id', 'visit_date').join(macrovisits_df, on=['person_id'], how= 'outer')
+    df_hosp = df_hosp.withColumn('during_macrovisit_hospitalization', F.when((F.datediff("macrovisit_end_date","visit_date")>=0) & (F.datediff("macrovisit_start_date","visit_date")<=0), 1).otherwise(0)) \
+        .drop('macrovisit_start_date', 'macrovisit_end_date') \
+        .where(F.col('during_macrovisit_hospitalization') == 1) \
+        .distinct()
+    df = df.join(df_hosp, on=['person_id','visit_date'], how="left")   
 
-    #final fill of null in non-continuous variables with 0
-    # df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
+    # final fill of null in non-continuous variables with 0
+    df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
 
 
     return df
