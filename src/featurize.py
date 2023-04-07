@@ -87,15 +87,15 @@ def custom_concept_set_members(concept_set_members):
 
 def everyone_cohort_de_id( person, microvisits_to_macrovisits, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
-        
+
     """
-    Select proportion of enclave patients to use: A value of 1.0 indicates the pipeline will use all patients in the persons table.  
+    Select proportion of enclave patients to use: A value of 1.0 indicates the pipeline will use all patients in the persons table.
     A value less than 1.0 takes a random sample of the patients with a value of 0.001 (for example) representing a 0.1% sample of the persons table will be used.
     """
     proportion_of_patients_to_use = 1.0
 
     concepts_df = concept_set_members
-    
+
     df = person \
         .select('person_id','year_of_birth','month_of_birth','day_of_birth') \
         .distinct() \
@@ -104,10 +104,10 @@ def everyone_cohort_de_id( person, microvisits_to_macrovisits, custom_concept_se
     visits_df = microvisits_to_macrovisits.select("person_id", "visit_start_date")
 
 
-    
+
     #join in location_df data to person_sample dataframe
 
-    
+
     #calculate date of birth for all patients
     df = df.withColumn("new_year_of_birth", F.when(F.col('year_of_birth').isNull(),1)
                                                 .otherwise(F.col('year_of_birth')))
@@ -119,7 +119,7 @@ def everyone_cohort_de_id( person, microvisits_to_macrovisits, custom_concept_se
                                                 .otherwise(F.col('day_of_birth')))
 
     df = df.withColumn("date_of_birth", F.concat_ws("-", F.col("new_year_of_birth"), F.col("new_month_of_birth"), F.col("new_day_of_birth")))
-    df = df.withColumn("date_of_birth", F.to_date("date_of_birth", format=None)) 
+    df = df.withColumn("date_of_birth", F.to_date("date_of_birth", format=None))
 
 
 
@@ -150,7 +150,7 @@ def everyone_cohort_de_id( person, microvisits_to_macrovisits, custom_concept_se
 
     non_hosp_visits = visits_df.where(F.col("visit_start_date").isNull()) \
         .dropDuplicates(["person_id", "visit_start_date"]) #non-hospital
-        
+
     visits_df = hosp_visits.union(non_hosp_visits) #join the two
 
     #total number of visits
@@ -158,13 +158,13 @@ def everyone_cohort_de_id( person, microvisits_to_macrovisits, custom_concept_se
         .count() \
         .select("person_id", F.col('count').alias('total_visits'))
 
-    #obs period in days 
+    #obs period in days
     observation_period = visits_df.groupby('person_id').agg(
         F.max('visit_start_date').alias('pt_max_visit_date'),
         F.min('visit_start_date').alias('pt_min_visit_date')) \
         .withColumn('observation_period', F.datediff('pt_max_visit_date', 'pt_min_visit_date')) \
         .select('person_id', 'observation_period')
-    
+
     #join visit counts/obs periods dataframes with main dataframe
     df = df.join(visits_count, "person_id", "left")
     df = df.join(observation_period, "person_id", "left")
@@ -182,7 +182,7 @@ def everyone_conditions_of_interest(everyone_cohort_de_id, condition_occurrence,
 
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
-    #filter observations table to only cohort patients    
+    #filter observations table to only cohort patients
     conditions_df = condition_occurrence \
         .select('person_id', 'condition_start_date', 'condition_concept_id') \
         .where(F.col('condition_start_date').isNotNull()) \
@@ -203,17 +203,17 @@ def everyone_conditions_of_interest(everyone_cohort_de_id, condition_occurrence,
 
     #find conditions information based on matching concept ids for conditions of interest
     df = conditions_df.join(concepts_df, 'concept_id', 'inner')
-    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for conditions of interest    
+    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for conditions of interest
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
-   
+
     return df
 
 def everyone_observations_of_interest(observation, everyone_cohort_de_id, customized_concept_set_input, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
-   
+
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
-    #filter observations table to only cohort patients    
+    #filter observations table to only cohort patients
     observations_df = observation \
         .select('person_id','observation_date','observation_concept_id') \
         .where(F.col('observation_date').isNotNull()) \
@@ -234,17 +234,17 @@ def everyone_observations_of_interest(observation, everyone_cohort_de_id, custom
 
     #find observations information based on matching concept ids for observations of interest
     df = observations_df.join(concepts_df, 'concept_id', 'inner')
-    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for observations of interest    
+    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for observations of interest
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
 
     return df
 
 def everyone_procedures_of_interest(everyone_cohort_de_id, procedure_occurrence, customized_concept_set_input, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
-  
+
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
-    #filter procedure occurrence table to only cohort patients    
+    #filter procedure occurrence table to only cohort patients
     procedures_df = procedure_occurrence \
         .select('person_id','procedure_date','procedure_concept_id') \
         .where(F.col('procedure_date').isNotNull()) \
@@ -262,10 +262,10 @@ def everyone_procedures_of_interest(everyone_cohort_de_id, procedure_occurrence,
         .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix')
- 
+
     #find procedure occurrence information based on matching concept ids for procedures of interest
     df = procedures_df.join(concepts_df, 'concept_id', 'inner')
-    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for procedures of interest    
+    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for procedures of interest
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
 
     return df
@@ -293,7 +293,7 @@ def everyone_devices_of_interest(device_exposure, everyone_cohort_de_id, customi
         .where((F.col('is_most_recent_version')=='true')  | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix')
-        
+
     #find device exposure information based on matching concept ids for devices of interest
     df = devices_df.join(concepts_df, 'concept_id', 'inner')
     #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for devices of interest
@@ -303,10 +303,10 @@ def everyone_devices_of_interest(device_exposure, everyone_cohort_de_id, customi
 
 def everyone_drugs_of_interest( drug_exposure, everyone_cohort_de_id, customized_concept_set_input, first_covid_positive, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
-  
+
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
-    #filter drug exposure table to only cohort patients    
+    #filter drug exposure table to only cohort patients
     drug_df = drug_exposure \
         .select('person_id','drug_exposure_start_date','drug_concept_id') \
         .where(F.col('drug_exposure_start_date').isNotNull()) \
@@ -324,7 +324,7 @@ def everyone_drugs_of_interest( drug_exposure, everyone_cohort_de_id, customized
         .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix', 'concept_set_name')
-        
+
     #find drug exposure information based on matching concept ids for drugs of interest
     df = drug_df.join(concepts_df, 'concept_id', 'inner')
     #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for drugs of interest
@@ -338,20 +338,20 @@ def everyone_drugs_of_interest( drug_exposure, everyone_cohort_de_id, customized
 
 def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
-    
+
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id', 'gender_concept_name')
-    #filter procedure occurrence table to only cohort patients    
+    #filter procedure occurrence table to only cohort patients
     df = measurement \
         .select('person_id','measurement_date','measurement_concept_id','value_as_number','value_as_concept_id','value_as_number') \
         .where(F.col('measurement_date').isNotNull()) \
         .withColumnRenamed('measurement_date','visit_date') \
         .join(persons,'person_id','inner')
-        
+
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
         .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True))
-          
+
     #Find BMI closest to COVID using both reported/observed BMI and calculated BMI using height and weight.  Cutoffs for reasonable height, weight, and BMI are provided and can be changed by the template user.
     lowest_acceptable_BMI = 10
     highest_acceptable_BMI = 100
@@ -363,11 +363,11 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     blood_oxygen_codeset_id=[40762499] # normal people: 75-100
     lowest_blood_oxygen = 20
     highest_blood_oxygen = 100
-    
+
     blood_sodium_codeset_id=[3019550]    # normal people: 137-145
     lowest_blood_sodium = 90
     highest_blood_sodium = 200
-    
+
     blood_hemoglobin_codeset_id=[3000963]  # normal people: 11-16
     lowest_blood_hemoglobin = 3
     highest_blood_hemoglobin = 40
@@ -375,7 +375,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     respiratory_rate_codeset_id=[3024171]  # normal people: 12-20
     lowest_respiratory_rate=5
     highest_respiratory_rate=60
-    
+
     blood_Creatinine_codeset_id=[3016723]  # normal people: 0.6-1.3
     lowest_blood_Creatinine = 0.2
     highest_blood_Creatinine = 5
@@ -383,7 +383,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     blood_UreaNitrogen_codeset_id=[3013682]  # normal people: 10-20
     lowest_blood_UreaNitrogen = 3
     highest_blood_UreaNitrogen = 80
-    
+
     blood_Potassium_codeset_id=[3023103]  # normal people: 3.5-5.0 mEq/L
     lowest_blood_Potassium = 1
     highest_blood_Potassium = 30
@@ -391,7 +391,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     blood_Chloride_codeset_id=[3014576]  # normal people: 96-106 mEq/L
     lowest_blood_Chloride = 60
     highest_blood_Chloride = 300
-    
+
     blood_Calcium_codeset_id=[3006906]  # normal people: 8.5-10.2 mg/dL
     lowest_blood_Calcium = 3
     highest_blood_Calcium = 30
@@ -400,22 +400,22 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     lowest_MCV = 50
     highest_MCV = 300
 
-    Erythrocytes_codeset_id=[3020416]  # normal people: 4-6 million cells per microliter 
+    Erythrocytes_codeset_id=[3020416]  # normal people: 4-6 million cells per microliter
     lowest_Erythrocytes = 1
     highest_Erythrocytes = 20
 
-    MCHC_codeset_id=[3009744]  # normal people: 31-37 g/dL 
+    MCHC_codeset_id=[3009744]  # normal people: 31-37 g/dL
     lowest_MCHC = 10
     highest_MCHC = 60
 
-    Systolic_blood_pressure_codeset_id=[3004249]   
+    Systolic_blood_pressure_codeset_id=[3004249]
     lowest_Systolic_blood_pressure = 0
     highest_Systolic_blood_pressure = 500
 
-    Diastolic_blood_pressure_codeset_id=[3012888,4154790]   
+    Diastolic_blood_pressure_codeset_id=[3012888,4154790]
     lowest_Diastolic_blood_pressure = 0
     highest_Diastolic_blood_pressure = 500
-    
+
     heart_rate_codeset_id=[3027018]  # normal people: 60-100 per min
     lowest_heart_rate = 10
     highest_heart_rate = 300
@@ -423,11 +423,11 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     temperature_codeset_id=[3020891]  # normal people: 36-38
     lowest_temperature = 35
     highest_temperature = 43
-    
-    blood_Glucose_codeset_id=[3004501]  # normal people: 
+
+    blood_Glucose_codeset_id=[3004501]  # normal people:
     lowest_blood_Glucose = 50
     highest_blood_Glucose = 500
-    
+
     blood_Platelets_codeset_id=[3024929]  # normal people: 130-459
     lowest_blood_Platelets = 50
     highest_blood_Platelets = 1000
@@ -435,7 +435,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     blood_Hematocrit_codeset_id=[3023314]  # normal people: 30-54
     lowest_blood_Hematocrit = 10
     highest_blood_Hematocrit = 150
-    
+
     blood_Leukocytes_codeset_id=[3000905]  # normal people: 4-11
     lowest_blood_Leukocytes = 1
     highest_blood_Leukocytes = 30
@@ -447,7 +447,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     blood_Albumin_codeset_id=[3024561]  # normal people: 3.5-5.0
     lowest_blood_Albumin = 1
     highest_blood_Albumin = 30
-    
+
     ####
     blood_Troponin_codeset_id=[3033745]  # normal people: 0-0.01
     lowest_blood_Troponin = 0
@@ -458,81 +458,81 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     highest_blood_Procalcitonin = 1
 
     bmi_codeset_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="body mass index") 
+        (concepts_df.concept_set_name=="body mass index")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
     weight_codeset_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="Body weight (LG34372-9 and SNOMED)") 
+        (concepts_df.concept_set_name=="Body weight (LG34372-9 and SNOMED)")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
     height_codeset_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="Height (LG34373-7 + SNOMED)") 
+        (concepts_df.concept_set_name=="Height (LG34373-7 + SNOMED)")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
-    
+
     pcr_ag_test_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="ATLAS SARS-CoV-2 rt-PCR and AG") 
+        (concepts_df.concept_set_name=="ATLAS SARS-CoV-2 rt-PCR and AG")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
     antibody_test_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="Atlas #818 [N3C] CovidAntibody retry") 
+        (concepts_df.concept_set_name=="Atlas #818 [N3C] CovidAntibody retry")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
     covid_positive_measurement_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="ResultPos") 
+        (concepts_df.concept_set_name=="ResultPos")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
     covid_negative_measurement_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="ResultNeg") 
+        (concepts_df.concept_set_name=="ResultNeg")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
- 
+
     #add value columns for rows associated with the above concept sets, but only include BMI or height or weight when in reasonable range
     BMI_df = df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('Recorded_BMI', F.when(df.measurement_concept_id.isin(bmi_codeset_ids) & df.value_as_number.between(lowest_acceptable_BMI, highest_acceptable_BMI), df.value_as_number).otherwise(0)) \
         .withColumn('height', F.when(df.measurement_concept_id.isin(height_codeset_ids) & df.value_as_number.between(lowest_acceptable_height, highest_acceptable_height), df.value_as_number).otherwise(0)) \
-        .withColumn('weight', F.when(df.measurement_concept_id.isin(weight_codeset_ids) & df.value_as_number.between(lowest_acceptable_weight, highest_acceptable_weight), df.value_as_number).otherwise(0)) 
+        .withColumn('weight', F.when(df.measurement_concept_id.isin(weight_codeset_ids) & df.value_as_number.between(lowest_acceptable_weight, highest_acceptable_weight), df.value_as_number).otherwise(0))
 
     blood_oxygen_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('Oxygen_saturation', F.when(df.measurement_concept_id.isin(blood_oxygen_codeset_id) & df.value_as_number.between(lowest_blood_oxygen, highest_blood_oxygen), df.value_as_number).otherwise(0))
-    
+
     blood_sodium_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_sodium', F.when(df.measurement_concept_id.isin(blood_sodium_codeset_id) & df.value_as_number.between(lowest_blood_sodium, highest_blood_sodium), df.value_as_number).otherwise(0))
 
-   
+
     blood_hemoglobin_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_hemoglobin', F.when(df.measurement_concept_id.isin(blood_hemoglobin_codeset_id) & df.value_as_number.between(lowest_blood_hemoglobin, highest_blood_hemoglobin), df.value_as_number).otherwise(0))
-    
+
     respiratory_rate_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('respiratory_rate', F.when(df.measurement_concept_id.isin(respiratory_rate_codeset_id) & df.value_as_number.between(lowest_respiratory_rate, highest_respiratory_rate), df.value_as_number).otherwise(0))
- 
+
     blood_Creatinine_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Creatinine', F.when(df.measurement_concept_id.isin(blood_Creatinine_codeset_id) & df.value_as_number.between(lowest_blood_Creatinine, highest_blood_Creatinine), df.value_as_number).otherwise(0))
 
     blood_UreaNitrogen_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_UreaNitrogen', F.when(df.measurement_concept_id.isin(blood_UreaNitrogen_codeset_id) & df.value_as_number.between(lowest_blood_UreaNitrogen, highest_blood_UreaNitrogen), df.value_as_number).otherwise(0))
-    
+
     blood_Potassium_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Potassium', F.when(df.measurement_concept_id.isin(blood_Potassium_codeset_id) & df.value_as_number.between(lowest_blood_Potassium, highest_blood_Potassium), df.value_as_number).otherwise(0))
-    
+
     blood_Chloride_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Chloride', F.when(df.measurement_concept_id.isin(blood_Chloride_codeset_id) & df.value_as_number.between(lowest_blood_Chloride, highest_blood_Chloride), df.value_as_number).otherwise(0))
-    
+
     blood_Calcium_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Calcium', F.when(df.measurement_concept_id.isin(blood_Calcium_codeset_id) & df.value_as_number.between(lowest_blood_Calcium, highest_blood_Calcium), df.value_as_number).otherwise(0))
-    
+
     MCV_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('MCV', F.when(df.measurement_concept_id.isin(MCV_codeset_id) & df.value_as_number.between(lowest_MCV, highest_MCV), df.value_as_number).otherwise(0))
-    
+
     Erythrocytes_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('Erythrocytes', F.when(df.measurement_concept_id.isin(Erythrocytes_codeset_id) & df.value_as_number.between(lowest_Erythrocytes, highest_Erythrocytes), df.value_as_number).otherwise(0))
-    
+
     MCHC_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('MCHC', F.when(df.measurement_concept_id.isin(MCHC_codeset_id) & df.value_as_number.between(lowest_MCHC, highest_MCHC), df.value_as_number).otherwise(0))
-    
+
     Systolic_blood_pressure_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('Systolic_blood_pressure', F.when(df.measurement_concept_id.isin(Systolic_blood_pressure_codeset_id) & df.value_as_number.between(lowest_Systolic_blood_pressure, highest_Systolic_blood_pressure), df.value_as_number).otherwise(0))
-    
+
     Diastolic_blood_pressure_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('Diastolic_blood_pressure', F.when(df.measurement_concept_id.isin(Diastolic_blood_pressure_codeset_id) & df.value_as_number.between(lowest_Diastolic_blood_pressure, highest_Diastolic_blood_pressure), df.value_as_number).otherwise(0))
 
@@ -541,29 +541,29 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
 
     temperature_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('temperature', F.when(df.measurement_concept_id.isin(temperature_codeset_id) & df.value_as_number.between(lowest_temperature, highest_temperature), df.value_as_number).otherwise(0))
-    
+
     blood_Glucose_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Glucose', F.when(df.measurement_concept_id.isin(blood_Glucose_codeset_id) & df.value_as_number.between(lowest_blood_Glucose, highest_blood_Glucose), df.value_as_number).otherwise(0))
-    
+
     blood_Platelets_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Platelets', F.when(df.measurement_concept_id.isin(blood_Platelets_codeset_id) & df.value_as_number.between(lowest_blood_Platelets, highest_blood_Platelets), df.value_as_number).otherwise(0))
-    
+
     blood_Hematocrit_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Hematocrit', F.when(df.measurement_concept_id.isin(blood_Hematocrit_codeset_id) & df.value_as_number.between(lowest_blood_Hematocrit, highest_blood_Hematocrit), df.value_as_number).otherwise(0))
-    
+
     blood_Leukocytes_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Leukocytes', F.when(df.measurement_concept_id.isin(blood_Leukocytes_codeset_id) & df.value_as_number.between(lowest_blood_Leukocytes, highest_blood_Leukocytes), df.value_as_number).otherwise(0))
-    
+
     blood_Bilirubin_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Bilirubin', F.when(df.measurement_concept_id.isin(blood_Bilirubin_codeset_id) & df.value_as_number.between(lowest_blood_Bilirubin, highest_blood_Bilirubin), df.value_as_number).otherwise(0))
-    
+
     blood_Albumin_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Albumin', F.when(df.measurement_concept_id.isin(blood_Albumin_codeset_id) & df.value_as_number.between(lowest_blood_Albumin, highest_blood_Albumin), df.value_as_number).otherwise(0))
-    
+
     ####
     blood_Troponin_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Troponin', F.when(df.measurement_concept_id.isin(blood_Troponin_codeset_id) & df.value_as_number.between(lowest_blood_Troponin, highest_blood_Troponin), df.value_as_number).otherwise(0))
-    
+
     blood_Procalcitonin_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Procalcitonin', F.when(df.measurement_concept_id.isin(blood_Procalcitonin_codeset_id) & df.value_as_number.between(lowest_blood_Procalcitonin, highest_blood_Procalcitonin), df.value_as_number).otherwise(0))
 
@@ -572,7 +572,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
         .withColumn('Antibody_Pos', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_positive_measurement_ids), 1).otherwise(0)) \
         .withColumn('Antibody_Neg', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0)) \
         .withColumn('SEX', F.when(F.col('gender_concept_name') == 'FEMALE', 1).otherwise(0))
-     
+
     #collapse all reasonable values to unique person and visit rows
     BMI_df = BMI_df.groupby('person_id', 'visit_date').agg(
     F.max('Recorded_BMI').alias('Recorded_BMI'),
@@ -648,11 +648,11 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     temperature_df = temperature_df.groupby('person_id', 'visit_date').agg(
     F.max('temperature').alias('temperature')
     )
-    
+
     blood_Glucose_df = blood_Glucose_df.groupby('person_id', 'visit_date').agg(
     F.max('blood_Glucose').alias('blood_Glucose')
     )
-    
+
     blood_Platelets_df = blood_Platelets_df.groupby('person_id', 'visit_date').agg(
     F.max('blood_Platelets').alias('blood_Platelets')
     )
@@ -676,13 +676,13 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     blood_Troponin_df = blood_Troponin_df.groupby('person_id', 'visit_date').agg(
     F.max('blood_Troponin').alias('blood_Troponin')
     )
-    
+
     blood_Procalcitonin_df = blood_Procalcitonin_df.groupby('person_id', 'visit_date').agg(
     F.max('blood_Procalcitonin').alias('blood_Procalcitonin')
     )
 
     #add a calculated BMI for each visit date when height and weight available.  Note that if only one is available, it will result in zero
-    #subsequent filter out rows that would have resulted from unreasonable calculated_BMI being used as best_BMI for the visit 
+    #subsequent filter out rows that would have resulted from unreasonable calculated_BMI being used as best_BMI for the visit
     BMI_df = BMI_df.withColumn('calculated_BMI', (BMI_df.weight/(BMI_df.height*BMI_df.height)))
     BMI_df = BMI_df.withColumn('BMI', F.when(BMI_df.Recorded_BMI>0, BMI_df.Recorded_BMI).otherwise(BMI_df.calculated_BMI)) \
         .select('person_id','visit_date','BMI')
@@ -702,7 +702,7 @@ def everyone_conditions_of_interest(everyone_cohort_de_id, condition_occurrence,
 
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
-    #filter observations table to only cohort patients    
+    #filter observations table to only cohort patients
     conditions_df = condition_occurrence \
         .select('person_id', 'condition_start_date', 'condition_concept_id') \
         .where(F.col('condition_start_date').isNotNull()) \
@@ -723,9 +723,9 @@ def everyone_conditions_of_interest(everyone_cohort_de_id, condition_occurrence,
 
     #find conditions information based on matching concept ids for conditions of interest
     df = conditions_df.join(concepts_df, 'concept_id', 'inner')
-    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for conditions of interest    
+    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for conditions of interest
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
-   
+
     return df
 
 def custom_sets(LL_concept_sets_fusion_everyone):
@@ -763,7 +763,7 @@ def custom_sets(LL_concept_sets_fusion_everyone):
     df.loc[len(df.index)] = ["hydrocortisone_penn", "HYDROCORTISONE", "drug"]
     df.loc[len(df.index)] = ["B12_penn", "VITAMIN_B12", "drug"]
     df.loc[len(df.index)] = ["benzonatate_penn", "BENZONATATE", "drug"]
-    
+
     df.loc[len(df.index)] = ['pain_assessment_penn', 'PAIN_ASSESSMENT', 'observation']
     df.loc[len(df.index)] = ["pain_duration_penn", "PAIN_DURATION", "observation"]
     df.loc[len(df.index)] = ["characteristic_pain_penn", "PAIN_CHARACTERISTIC", "observation"]
@@ -798,10 +798,10 @@ def custom_sets(LL_concept_sets_fusion_everyone):
     df.loc[len(df.index)] = ["amlodipine_penn", "AMLODIPINE", "drug"]
     df.loc[len(df.index)] = ["metabolism_disorder_penn", "METADISORDER", "condition"]
     df.loc[len(df.index)] = ["bloodpressure_penn", "BLOODPRESSURE", "observation"]
-    df.loc[len(df.index)] = ["lungdisorder_penn", "LUNGDISORDER", "condition"]  
-    df.loc[len(df.index)] = ["sertraline_penn", "SERTRALINE", "drug"]  
-    df.loc[len(df.index)] = ["insulin_penn", "INSULIN", "drug"]  
-    
+    df.loc[len(df.index)] = ["lungdisorder_penn", "LUNGDISORDER", "condition"]
+    df.loc[len(df.index)] = ["sertraline_penn", "SERTRALINE", "drug"]
+    df.loc[len(df.index)] = ["insulin_penn", "INSULIN", "drug"]
+
 
 
     print(df)
@@ -812,18 +812,18 @@ def customized_concept_set_input( LL_DO_NOT_DELETE_REQUIRED_concept_sets_all, cu
 
     required = LL_DO_NOT_DELETE_REQUIRED_concept_sets_all
     customizable = custom_sets
-    
+
     df = required.join(customizable, on = required.columns, how = 'outer')
 
-    
+
     return df
 
 def everyone_observations_of_interest(observation, everyone_cohort_de_id, customized_concept_set_input, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
-   
+
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
-    #filter observations table to only cohort patients    
+    #filter observations table to only cohort patients
     observations_df = observation \
         .select('person_id','observation_date','observation_concept_id') \
         .where(F.col('observation_date').isNotNull()) \
@@ -844,17 +844,17 @@ def everyone_observations_of_interest(observation, everyone_cohort_de_id, custom
 
     #find observations information based on matching concept ids for observations of interest
     df = observations_df.join(concepts_df, 'concept_id', 'inner')
-    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for observations of interest    
+    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for observations of interest
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
 
     return df
 
 def everyone_procedures_of_interest(everyone_cohort_de_id, procedure_occurrence, customized_concept_set_input, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
-  
+
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
-    #filter procedure occurrence table to only cohort patients    
+    #filter procedure occurrence table to only cohort patients
     procedures_df = procedure_occurrence \
         .select('person_id','procedure_date','procedure_concept_id') \
         .where(F.col('procedure_date').isNotNull()) \
@@ -872,20 +872,20 @@ def everyone_procedures_of_interest(everyone_cohort_de_id, procedure_occurrence,
         .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix')
- 
+
     #find procedure occurrence information based on matching concept ids for procedures of interest
     df = procedures_df.join(concepts_df, 'concept_id', 'inner')
-    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for procedures of interest    
+    #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for procedures of interest
     df = df.groupby('person_id','visit_date').pivot('indicator_prefix').agg(F.lit(1)).na.fill(0)
 
     return df
-    
+
 def everyone_drugs_of_interest( drug_exposure, everyone_cohort_de_id, customized_concept_set_input, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
-  
+
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
-    #filter drug exposure table to only cohort patients    
+    #filter drug exposure table to only cohort patients
     drug_df = drug_exposure \
         .select('person_id','drug_exposure_start_date','drug_concept_id') \
         .where(F.col('drug_exposure_start_date').isNotNull()) \
@@ -903,7 +903,7 @@ def everyone_drugs_of_interest( drug_exposure, everyone_cohort_de_id, customized
         .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True)) \
         .join(fusion_df, 'concept_set_name', 'inner') \
         .select('concept_id','indicator_prefix', 'concept_set_name')
-        
+
     #find drug exposure information based on matching concept ids for drugs of interest
     df = drug_df.join(concepts_df, 'concept_id', 'inner')
     #collapse to unique person and visit date and pivot on future variable name to create flag for rows associated with the concept sets for drugs of interest
@@ -912,20 +912,20 @@ def everyone_drugs_of_interest( drug_exposure, everyone_cohort_de_id, customized
 
 def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom_concept_set_members):
     concept_set_members = custom_concept_set_members
-    
+
     #bring in only cohort patient ids
     persons = everyone_cohort_de_id.select('person_id')
-    #filter procedure occurrence table to only cohort patients    
+    #filter procedure occurrence table to only cohort patients
     df = measurement \
         .select('person_id','measurement_date','measurement_concept_id','value_as_concept_id','value_as_number') \
         .where(F.col('measurement_date').isNotNull()) \
         .withColumnRenamed('measurement_date','visit_date') \
         .join(persons,'person_id','inner')
-        
+
     concepts_df = concept_set_members \
         .select('concept_set_name', 'is_most_recent_version', 'concept_id') \
         .where((F.col('is_most_recent_version')=='true') | (F.col('is_most_recent_version')==True))
-          
+
     #Find BMI closest to COVID using both reported/observed BMI and calculated BMI using height and weight.  Cutoffs for reasonable height, weight, and BMI are provided and can be changed by the template user.
     lowest_acceptable_BMI = 10
     highest_acceptable_BMI = 100
@@ -937,11 +937,11 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     blood_oxygen_codeset_id=[40762499] # normal people: 75-100
     lowest_blood_oxygen = 20
     highest_blood_oxygen = 100
-    
+
     blood_sodium_codeset_id=[3019550]    # normal people: 137-145
     lowest_blood_sodium = 90
     highest_blood_sodium = 200
-    
+
     blood_hemoglobin_codeset_id=[3000963]  # normal people: 11-16
     lowest_blood_hemoglobin = 3
     highest_blood_hemoglobin = 40
@@ -949,7 +949,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     respiratory_rate_codeset_id=[3024171]  # normal people: 12-20
     lowest_respiratory_rate=5
     highest_respiratory_rate=60
-    
+
     blood_Creatinine_codeset_id=[3016723]  # normal people: 0.6-1.3
     lowest_blood_Creatinine = 0.2
     highest_blood_Creatinine = 5
@@ -957,7 +957,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     blood_UreaNitrogen_codeset_id=[3013682]  # normal people: 10-20
     lowest_blood_UreaNitrogen = 3
     highest_blood_UreaNitrogen = 80
-    
+
     blood_Potassium_codeset_id=[3023103]  # normal people: 3.5-5.0 mEq/L
     lowest_blood_Potassium = 1
     highest_blood_Potassium = 30
@@ -965,7 +965,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     blood_Chloride_codeset_id=[3014576]  # normal people: 96-106 mEq/L
     lowest_blood_Chloride = 60
     highest_blood_Chloride = 300
-    
+
     blood_Calcium_codeset_id=[3006906]  # normal people: 8.5-10.2 mg/dL
     lowest_blood_Calcium = 3
     highest_blood_Calcium = 30
@@ -974,22 +974,22 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     lowest_MCV = 50
     highest_MCV = 300
 
-    Erythrocytes_codeset_id=[3020416]  # normal people: 4-6 million cells per microliter 
+    Erythrocytes_codeset_id=[3020416]  # normal people: 4-6 million cells per microliter
     lowest_Erythrocytes = 1
     highest_Erythrocytes = 20
 
-    MCHC_codeset_id=[3009744]  # normal people: 31-37 g/dL 
+    MCHC_codeset_id=[3009744]  # normal people: 31-37 g/dL
     lowest_MCHC = 10
     highest_MCHC = 60
 
-    Systolic_blood_pressure_codeset_id=[3004249]   
+    Systolic_blood_pressure_codeset_id=[3004249]
     lowest_Systolic_blood_pressure = 0
     highest_Systolic_blood_pressure = 500
 
-    Diastolic_blood_pressure_codeset_id=[3012888,4154790]   
+    Diastolic_blood_pressure_codeset_id=[3012888,4154790]
     lowest_Diastolic_blood_pressure = 0
     highest_Diastolic_blood_pressure = 500
-    
+
     heart_rate_codeset_id=[3027018]  # normal people: 60-100 per min
     lowest_heart_rate = 10
     highest_heart_rate = 300
@@ -997,11 +997,11 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     temperature_codeset_id=[3020891]  # normal people: 36-38
     lowest_temperature = 35
     highest_temperature = 43
-    
-    blood_Glucose_codeset_id=[3004501]  # normal people: 
+
+    blood_Glucose_codeset_id=[3004501]  # normal people:
     lowest_blood_Glucose = 50
     highest_blood_Glucose = 500
-    
+
     blood_Platelets_codeset_id=[3024929]  # normal people: 130-459
     lowest_blood_Platelets = 50
     highest_blood_Platelets = 1000
@@ -1009,7 +1009,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     blood_Hematocrit_codeset_id=[3023314]  # normal people: 30-54
     lowest_blood_Hematocrit = 10
     highest_blood_Hematocrit = 150
-    
+
     blood_Leukocytes_codeset_id=[3000905]  # normal people: 4-11
     lowest_blood_Leukocytes = 1
     highest_blood_Leukocytes = 30
@@ -1021,7 +1021,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     blood_Albumin_codeset_id=[3024561]  # normal people: 3.5-5.0
     lowest_blood_Albumin = 1
     highest_blood_Albumin = 30
-    
+
     ####
     blood_Troponin_codeset_id=[3033745]  # normal people: 0-0.01
     lowest_blood_Troponin = 0
@@ -1033,81 +1033,81 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
 
 
     bmi_codeset_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="body mass index") 
+        (concepts_df.concept_set_name=="body mass index")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
     weight_codeset_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="Body weight (LG34372-9 and SNOMED)") 
+        (concepts_df.concept_set_name=="Body weight (LG34372-9 and SNOMED)")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
     height_codeset_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="Height (LG34373-7 + SNOMED)") 
+        (concepts_df.concept_set_name=="Height (LG34373-7 + SNOMED)")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
-    
+
     pcr_ag_test_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="ATLAS SARS-CoV-2 rt-PCR and AG") 
+        (concepts_df.concept_set_name=="ATLAS SARS-CoV-2 rt-PCR and AG")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
     antibody_test_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="Atlas #818 [N3C] CovidAntibody retry") 
+        (concepts_df.concept_set_name=="Atlas #818 [N3C] CovidAntibody retry")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
     covid_positive_measurement_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="ResultPos") 
+        (concepts_df.concept_set_name=="ResultPos")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
     covid_negative_measurement_ids = list(concepts_df.where(
-        (concepts_df.concept_set_name=="ResultNeg") 
+        (concepts_df.concept_set_name=="ResultNeg")
         & (concepts_df.is_most_recent_version=='true')
         ).select('concept_id').toPandas()['concept_id'])
- 
+
     #add value columns for rows associated with the above concept sets, but only include BMI or height or weight when in reasonable range
     BMI_df = df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('Recorded_BMI', F.when(df.measurement_concept_id.isin(bmi_codeset_ids) & df.value_as_number.between(lowest_acceptable_BMI, highest_acceptable_BMI), df.value_as_number).otherwise(0)) \
         .withColumn('height', F.when(df.measurement_concept_id.isin(height_codeset_ids) & df.value_as_number.between(lowest_acceptable_height, highest_acceptable_height), df.value_as_number).otherwise(0)) \
-        .withColumn('weight', F.when(df.measurement_concept_id.isin(weight_codeset_ids) & df.value_as_number.between(lowest_acceptable_weight, highest_acceptable_weight), df.value_as_number).otherwise(0)) 
+        .withColumn('weight', F.when(df.measurement_concept_id.isin(weight_codeset_ids) & df.value_as_number.between(lowest_acceptable_weight, highest_acceptable_weight), df.value_as_number).otherwise(0))
 
     blood_oxygen_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('Oxygen_saturation', F.when(df.measurement_concept_id.isin(blood_oxygen_codeset_id) & df.value_as_number.between(lowest_blood_oxygen, highest_blood_oxygen), df.value_as_number).otherwise(0))
-    
+
     blood_sodium_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_sodium', F.when(df.measurement_concept_id.isin(blood_sodium_codeset_id) & df.value_as_number.between(lowest_blood_sodium, highest_blood_sodium), df.value_as_number).otherwise(0))
 
-   
+
     blood_hemoglobin_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_hemoglobin', F.when(df.measurement_concept_id.isin(blood_hemoglobin_codeset_id) & df.value_as_number.between(lowest_blood_hemoglobin, highest_blood_hemoglobin), df.value_as_number).otherwise(0))
-    
+
     respiratory_rate_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('respiratory_rate', F.when(df.measurement_concept_id.isin(respiratory_rate_codeset_id) & df.value_as_number.between(lowest_respiratory_rate, highest_respiratory_rate), df.value_as_number).otherwise(0))
- 
+
     blood_Creatinine_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Creatinine', F.when(df.measurement_concept_id.isin(blood_Creatinine_codeset_id) & df.value_as_number.between(lowest_blood_Creatinine, highest_blood_Creatinine), df.value_as_number).otherwise(0))
 
     blood_UreaNitrogen_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_UreaNitrogen', F.when(df.measurement_concept_id.isin(blood_UreaNitrogen_codeset_id) & df.value_as_number.between(lowest_blood_UreaNitrogen, highest_blood_UreaNitrogen), df.value_as_number).otherwise(0))
-    
+
     blood_Potassium_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Potassium', F.when(df.measurement_concept_id.isin(blood_Potassium_codeset_id) & df.value_as_number.between(lowest_blood_Potassium, highest_blood_Potassium), df.value_as_number).otherwise(0))
-    
+
     blood_Chloride_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Chloride', F.when(df.measurement_concept_id.isin(blood_Chloride_codeset_id) & df.value_as_number.between(lowest_blood_Chloride, highest_blood_Chloride), df.value_as_number).otherwise(0))
-    
+
     blood_Calcium_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Calcium', F.when(df.measurement_concept_id.isin(blood_Calcium_codeset_id) & df.value_as_number.between(lowest_blood_Calcium, highest_blood_Calcium), df.value_as_number).otherwise(0))
-    
+
     MCV_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('MCV', F.when(df.measurement_concept_id.isin(MCV_codeset_id) & df.value_as_number.between(lowest_MCV, highest_MCV), df.value_as_number).otherwise(0))
-    
+
     Erythrocytes_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('Erythrocytes', F.when(df.measurement_concept_id.isin(Erythrocytes_codeset_id) & df.value_as_number.between(lowest_Erythrocytes, highest_Erythrocytes), df.value_as_number).otherwise(0))
-    
+
     MCHC_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('MCHC', F.when(df.measurement_concept_id.isin(MCHC_codeset_id) & df.value_as_number.between(lowest_MCHC, highest_MCHC), df.value_as_number).otherwise(0))
-    
+
     Systolic_blood_pressure_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('Systolic_blood_pressure', F.when(df.measurement_concept_id.isin(Systolic_blood_pressure_codeset_id) & df.value_as_number.between(lowest_Systolic_blood_pressure, highest_Systolic_blood_pressure), df.value_as_number).otherwise(0))
-    
+
     Diastolic_blood_pressure_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('Diastolic_blood_pressure', F.when(df.measurement_concept_id.isin(Diastolic_blood_pressure_codeset_id) & df.value_as_number.between(lowest_Diastolic_blood_pressure, highest_Diastolic_blood_pressure), df.value_as_number).otherwise(0))
 
@@ -1116,29 +1116,29 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
 
     temperature_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('temperature', F.when(df.measurement_concept_id.isin(temperature_codeset_id) & df.value_as_number.between(lowest_temperature, highest_temperature), df.value_as_number).otherwise(0))
-    
+
     blood_Glucose_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Glucose', F.when(df.measurement_concept_id.isin(blood_Glucose_codeset_id) & df.value_as_number.between(lowest_blood_Glucose, highest_blood_Glucose), df.value_as_number).otherwise(0))
-    
+
     blood_Platelets_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Platelets', F.when(df.measurement_concept_id.isin(blood_Platelets_codeset_id) & df.value_as_number.between(lowest_blood_Platelets, highest_blood_Platelets), df.value_as_number).otherwise(0))
-    
+
     blood_Hematocrit_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Hematocrit', F.when(df.measurement_concept_id.isin(blood_Hematocrit_codeset_id) & df.value_as_number.between(lowest_blood_Hematocrit, highest_blood_Hematocrit), df.value_as_number).otherwise(0))
-    
+
     blood_Leukocytes_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Leukocytes', F.when(df.measurement_concept_id.isin(blood_Leukocytes_codeset_id) & df.value_as_number.between(lowest_blood_Leukocytes, highest_blood_Leukocytes), df.value_as_number).otherwise(0))
-    
+
     blood_Bilirubin_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Bilirubin', F.when(df.measurement_concept_id.isin(blood_Bilirubin_codeset_id) & df.value_as_number.between(lowest_blood_Bilirubin, highest_blood_Bilirubin), df.value_as_number).otherwise(0))
-    
+
     blood_Albumin_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Albumin', F.when(df.measurement_concept_id.isin(blood_Albumin_codeset_id) & df.value_as_number.between(lowest_blood_Albumin, highest_blood_Albumin), df.value_as_number).otherwise(0))
-    
+
     ####
     blood_Troponin_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Troponin', F.when(df.measurement_concept_id.isin(blood_Troponin_codeset_id) & df.value_as_number.between(lowest_blood_Troponin, highest_blood_Troponin), df.value_as_number).otherwise(0))
-    
+
     blood_Procalcitonin_df =  df.where(F.col('value_as_number').isNotNull()) \
         .withColumn('blood_Procalcitonin', F.when(df.measurement_concept_id.isin(blood_Procalcitonin_codeset_id) & df.value_as_number.between(lowest_blood_Procalcitonin, highest_blood_Procalcitonin), df.value_as_number).otherwise(0))
 
@@ -1146,7 +1146,7 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
         .withColumn('PCR_AG_Neg', F.when(df.measurement_concept_id.isin(pcr_ag_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0)) \
         .withColumn('Antibody_Pos', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_positive_measurement_ids), 1).otherwise(0)) \
         .withColumn('Antibody_Neg', F.when(df.measurement_concept_id.isin(antibody_test_ids) & df.value_as_concept_id.isin(covid_negative_measurement_ids), 1).otherwise(0))
-     
+
     #collapse all reasonable values to unique person and visit rows
     BMI_df = BMI_df.groupby('person_id', 'visit_date').agg(
     F.max('Recorded_BMI').alias('Recorded_BMI'),
@@ -1222,11 +1222,11 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     temperature_df = temperature_df.groupby('person_id', 'visit_date').agg(
     F.max('temperature').alias('temperature')
     )
-    
+
     blood_Glucose_df = blood_Glucose_df.groupby('person_id', 'visit_date').agg(
     F.max('blood_Glucose').alias('blood_Glucose')
     )
-    
+
     blood_Platelets_df = blood_Platelets_df.groupby('person_id', 'visit_date').agg(
     F.max('blood_Platelets').alias('blood_Platelets')
     )
@@ -1250,13 +1250,13 @@ def everyone_measurements_of_interest(measurement, everyone_cohort_de_id, custom
     blood_Troponin_df = blood_Troponin_df.groupby('person_id', 'visit_date').agg(
     F.max('blood_Troponin').alias('blood_Troponin')
     )
-    
+
     blood_Procalcitonin_df = blood_Procalcitonin_df.groupby('person_id', 'visit_date').agg(
     F.max('blood_Procalcitonin').alias('blood_Procalcitonin')
     )
 
     #add a calculated BMI for each visit date when height and weight available.  Note that if only one is available, it will result in zero
-    #subsequent filter out rows that would have resulted from unreasonable calculated_BMI being used as best_BMI for the visit 
+    #subsequent filter out rows that would have resulted from unreasonable calculated_BMI being used as best_BMI for the visit
     BMI_df = BMI_df.withColumn('calculated_BMI', (BMI_df.weight/(BMI_df.height*BMI_df.height)))
     BMI_df = BMI_df.withColumn('BMI', F.when(BMI_df.Recorded_BMI>0, BMI_df.Recorded_BMI).otherwise(BMI_df.calculated_BMI)) \
         .select('person_id','visit_date','BMI')
@@ -1297,15 +1297,15 @@ def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, ev
     df = df.join(drugs_df, on=list(set(df.columns)&set(drugs_df.columns)), how='outer')
     df = df.join(measurements_df, on=list(set(df.columns)&set(measurements_df.columns)), how='outer')
     # df = df.join(nlp_symptom_df, on=list(set(df.columns)&set(nlp_symptom_df.columns)), how='outer')
-    
+
     # df = df.na.fill(value=0, subset = [col for col in df.columns if col not in ('BMI_rounded')])
-   
+
     #add F.max of all indicator columns to collapse all cross-domain flags to unique person and visit rows
     #each visit_date represents the date of the event or fact being noted in the patient's medical record
     df = df.groupby('person_id', 'visit_date').agg(*[F.max(col).alias(col) for col in df.columns if col not in ('person_id','visit_date')])
-   
+
     #create and join in flag that indicates whether the visit day was during a macrovisit (1) or not (0)
-    #any conditions, observations, procedures, devices, drugs, measurements, and/or death flagged 
+    #any conditions, observations, procedures, devices, drugs, measurements, and/or death flagged
     #with a (1) on that particular visit date would then be considered to have happened during a macrovisit
     macrovisits_df = macrovisits_df \
         .select('person_id', 'macrovisit_start_date', 'macrovisit_end_date') \
@@ -1323,6 +1323,360 @@ def all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest, ev
 
 
     return df
+
+
+def everyone_vaccines_of_interest(everyone_cohort_de_id, Vaccine_fact_de_identified, first_covid_positive):
+    vaccine_fact_de_identified = Vaccine_fact_de_identified
+
+    persons = everyone_cohort_de_id.select('person_id')
+    vax_df = Vaccine_fact_de_identified.select('person_id', '1_vax_date', '2_vax_date', '3_vax_date', '4_vax_date') \
+        .join(persons, 'person_id', 'inner')
+
+    vax_switch = Vaccine_fact_de_identified.select('person_id', '1_vax_type', 'date_diff_1_2') \
+        .withColumnRenamed('date_diff_1_2', 'DATE_DIFF_1_2') \
+        .withColumn("1_VAX_JJ", F.when(F.col('1_vax_type') == 'janssen', 1).otherwise(0)) \
+        .withColumn("1_VAX_PFIZER", F.when(F.col('1_vax_type') == 'pfizer', 1).otherwise(0)) \
+        .withColumn("1_VAX_MODERNA", F.when(F.col('1_vax_type') == 'moderna', 1).otherwise(0)) \
+        .drop(F.col('1_vax_type'))
+
+    first_dose = vax_df.select('person_id', '1_vax_date') \
+        .withColumnRenamed('1_vax_date', 'visit_date') \
+        .withColumn('1_vax_dose', F.lit(1)) \
+        .where(F.col('visit_date').isNotNull())
+    second_dose = vax_df.select('person_id', '2_vax_date') \
+        .withColumnRenamed('2_vax_date', 'visit_date') \
+        .withColumn('2_vax_dose', F.lit(1)) \
+        .where(F.col('visit_date').isNotNull())
+    third_dose = vax_df.select('person_id', '3_vax_date') \
+        .withColumnRenamed('3_vax_date', 'visit_date') \
+        .withColumn('3_vax_dose', F.lit(1)) \
+        .where(F.col('visit_date').isNotNull())
+    fourth_dose = vax_df.select('person_id', '4_vax_date') \
+        .withColumnRenamed('4_vax_date', 'visit_date') \
+        .withColumn('4_vax_dose', F.lit(1)) \
+        .where(F.col('visit_date').isNotNull())
+
+    df = first_dose.join(second_dose, on=['person_id', 'visit_date'], how='outer') \
+        .join(third_dose, on=['person_id', 'visit_date'], how='outer') \
+        .join(fourth_dose, on=['person_id', 'visit_date'], how='outer') \
+        .join(vax_switch, on=['person_id'], how='inner') \
+        .distinct()
+
+    df = df.withColumn('had_vaccine_administered', F.lit(1)) \
+        .join(first_covid_positive, 'person_id', 'leftouter') \
+        .withColumn('vax_before_FCP', F.when(F.datediff(F.col('visit_date'), F.col('first_covid_positive')) < 0, 1).otherwise(0)) \
+        .withColumn('VAX_DAYS_SINCE_FCP', F.datediff(F.col('visit_date'), F.col('first_covid_positive'))) \
+        .drop(F.col('first_covid_positive'))
+
+    return df
+
+def first_covid_positive(everyone_conditions_of_interest):
+    w = Window.partitionBy('person_id').orderBy(F.asc('visit_date'))
+    df = (everyone_conditions_of_interest \
+        # .filter(F.col('LL_COVID_diagnosis') == 1) \
+        .select('person_id', F.first('visit_date').over(w).alias('first_covid_positive')) \
+        .distinct())
+
+    return df
+
+
+# ri.vector.main.execute.7641dae2-3118-4a2c-8a89-e4f646cbf18f
+def Vaccine_fact_de_identified(aggregate_person, sql_pivot_vax_person):
+    """
+SELECT distinct
+    a.person_id,
+    a.data_partner_id,
+    b.vaccine_txn,
+    datediff(1_vax_date, '2020-01-01') date_1_vax,
+    datediff(2_vax_date, 1_vax_date) date_diff_1_2,
+    datediff(3_vax_date, 2_vax_date) date_diff_2_3,
+    datediff(4_vax_date, 3_vax_date) date_diff_3_4,
+    case when 1_vax_type != 2_vax_type and 1_vax_date != 2_vax_date then 1 else 0 end as switch_1_2,
+    case when 2_vax_type != 3_vax_type and 2_vax_date != 3_vax_date then 1 else 0 end as switch_2_3,
+    case when 3_vax_type != 4_vax_type and 3_vax_date != 4_vax_date then 1 else 0 end as switch_3_4,
+    1_vax_date,
+    1_vax_type,
+    2_vax_date,
+    2_vax_type,
+    3_vax_date,
+    3_vax_type,
+    4_vax_date,
+    4_vax_type
+FROM sql_pivot_vax_person a LEFT JOIN aggregate_person b on a.person_id = b.person_id
+WHERE vaccine_txn < 5"""
+    # Join the pivoted vaccine data with the aggregate person data
+    Vaccine_fact_de_identified = sql_pivot_vax_person.join(aggregate_person, 'person_id', 'leftouter') \
+        .where(F.col('vaccine_txn') < 5) \
+        .distinct() \
+        .withColumn('date_1_vax', F.datediff(F.col('1_vax_date'), F.lit('2020-01-01'))) \
+        .withColumn('date_diff_1_2', F.datediff(F.col('2_vax_date'), F.col('1_vax_date'))) \
+        .withColumn('date_diff_2_3', F.datediff(F.col('3_vax_date'), F.col('2_vax_date'))) \
+        .withColumn('date_diff_3_4', F.datediff(F.col('4_vax_date'), F.col('3_vax_date'))) \
+        .withColumn('switch_1_2', F.when((F.col('1_vax_type') != F.col('2_vax_type')) & (F.col('1_vax_date') != F.col('2_vax_date')), 1).otherwise(0)) \
+        .withColumn('switch_2_3', F.when((F.col('2_vax_type') != F.col('3_vax_type')) & (F.col('2_vax_date') != F.col('3_vax_date')), 1).otherwise(0)) \
+        .withColumn('switch_3_4', F.when((F.col('3_vax_type') != F.col('4_vax_type')) & (F.col('3_vax_date') != F.col('4_vax_date')), 1).otherwise(0)) \
+        .select(
+            sql_pivot_vax_person['person_id'],
+            F.col('vaccine_txn'),
+            'date_1_vax',
+            'date_diff_1_2',
+            'date_diff_2_3',
+            'date_diff_3_4',
+            'switch_1_2',
+            'switch_2_3',
+            'switch_3_4',
+            '1_vax_date',
+            '1_vax_type',
+            '2_vax_date',
+            '2_vax_type',
+            '3_vax_date',
+            '3_vax_type',
+            '4_vax_date',
+            '4_vax_type')
+
+    return Vaccine_fact_de_identified
+
+# ri.vector.main.execute.0c8d244b-83b0-4a73-9488-3db78097ac5a
+def aggregate_person(deduplicated):
+    """
+SELECT person_id, data_partner_id, count(vax_date) as vaccine_txn
+FROM deduplicated
+group by person_id, data_partner_id"""
+    # Aggregate the number of vaccine transactions per person
+    aggregate_person = deduplicated.groupBy(
+        'person_id'
+    ).agg(
+        F.count('vax_date').alias('vaccine_txn')
+    )[[ 'person_id', 'vaccine_txn']]
+
+    return aggregate_person
+
+
+def deduplicated(distinct_vax_person):
+    ################################################################################
+    # 1. Resolve same day vaccinations with conflicting types. If one is null, use #
+    #    the other. With multiple valid types, make null.                          #
+    ################################################################################
+
+    # Filter down to unique combinations of person, day, and vaccine type then drop
+    # null values.
+    vax_types = distinct_vax_person.dropDuplicates(
+        ['person_id', 'vax_date', 'vax_type']
+    ).filter(
+        "vax_type is not NULL"
+    )
+
+    # Count number of types per person and day
+    w = Window.partitionBy('person_id', 'vax_date')
+    count_type = vax_types.select(
+        'person_id',
+        'vax_date',
+        'vax_type',
+        F.count('person_id').over(w).alias('n')
+    )
+
+    # Drop rows with multiple values so they end up null after future join
+    vax_types = count_type.filter(
+        count_type.n == 1
+    ).drop('n')
+
+    # Drop original vax_type and merge this new one back into dataframe
+    df = distinct_vax_person.drop(
+        'vax_type'
+    ).join(vax_types, on=['person_id', 'vax_date'], how='left')
+
+    ################################################################################
+    # 2. Deduplicate vaccines that are too close to be reasonable. Site 406 has    #
+    #    extra issues due to using procedures table, so be more aggressive there.  #
+    ################################################################################
+
+    # Window by person_id
+    w = Window.partitionBy('person_id').orderBy('vax_date')
+
+    # Get difference between each shot in days
+    df = df.withColumn(
+        'lag_date', F.lag('vax_date', default='2000-01-01').over(w)
+    ).withColumn(
+        'date_diff', F.datediff('vax_date', 'lag_date')
+    )
+
+    # For site 406, filter if less than 14. For everyone else, filter if less than 5
+    df = df.filter(df.date_diff >= 5)
+
+    return df
+
+# ri.vector.main.execute.8a3be0e3-a478-40ab-83b1-7289e3fc5136
+def distinct_vax_person(baseline_vaccines, baseline_vaccines_from_proc_testing):
+    """
+--create minimal long dataset of vaccine transactions to transpose
+
+SELECT DISTINCT person_id,
+    data_partner_id,
+    drug_exposure_start_date as vax_date,
+    vax_type
+FROM baseline_vaccines
+
+UNION
+
+SELECT DISTINCT person_id,
+    data_partner_id,
+    procedure_date as vax_date,
+    vax_type
+FROM baseline_vaccines_from_proc"""
+    # Create minimal long dataset of vaccine transactions to transpose
+    distinct_vax_person = baseline_vaccines.select(
+        'person_id', 'drug_exposure_start_date', 'vax_type'
+    ).withColumnRenamed(
+        'drug_exposure_start_date', 'vax_date'
+    ).union(
+        baseline_vaccines_from_proc_testing.select(
+            'person_id', 'procedure_date', 'vax_type'
+        ).withColumnRenamed(
+            'procedure_date', 'vax_date'
+        )
+    ).distinct()
+
+    return distinct_vax_person
+
+# ri.vector.main.execute.20bfed79-2fea-446f-a920-88f0dbc22bc2
+def baseline_vaccines(custom_concept_set_members, drug_exposure):
+    """
+SELECT distinct de.person_id,
+de.data_partner_id,
+de.drug_exposure_start_date,
+de.drug_source_concept_name,
+de.drug_concept_id,
+
+case when concept_id in (702677, 702678, 724907, 37003432, 37003435, 37003436) then 'pfizer'
+    when concept_id in (724906, 37003518) then 'moderna'
+    when concept_id in (702866, 739906) then 'janssen'
+    when concept_id in (724905) then 'astrazeneca'
+    else null
+    end as vax_type
+
+FROM custom_concept_set_members cs
+INNER JOIN drug_exposure de on cs.concept_id = de.drug_concept_id
+INNER JOIN manifest_safe_harbor m on de.data_partner_id = m.data_partner_id
+
+where codeset_id = 600531961
+    and drug_exposure_start_date is not null
+    -- Very conservative filters to allow for date shifting
+    and drug_exposure_start_date > '2018-12-20'
+    and drug_exposure_start_date < (m.run_date + 356*2)
+    and (
+        (drug_type_concept_id not in (38000177,32833,38000175,32838,32839))
+        or (drug_type_concept_id = 38000177 AND m.cdm_name = 'ACT')
+    )"""
+    # Create minimal long dataset of vaccine transactions to transpose
+    baseline_vaccines = custom_concept_set_members.select(
+        'concept_id'
+    ).withColumnRenamed(
+        'concept_id', 'drug_concept_id'
+    ).join(
+        drug_exposure, on='drug_concept_id', how='inner'
+    # ).filter(
+    #     F.col('codeset_id') == 600531961
+    ).filter(
+        F.col('drug_exposure_start_date').isNotNull()
+    ).filter(
+        F.col('drug_exposure_start_date') > '2018-12-20'
+    # ).filter(
+    #     F.col('drug_exposure_start_date') < (F.col('run_date') + 356*2)
+    ).filter(
+        (
+            (~F.col('drug_type_concept_id').isin([38000177, 32833, 38000175, 32838, 32839])) #| (
+                # (F.col('drug_type_concept_id') == 38000177) & (F.col('cdm_name') == 'ACT')
+        )
+    ).select(
+        'person_id', 'drug_exposure_start_date', 'drug_concept_id'
+    ).withColumn(
+        'vax_type', F.when(
+            F.col('drug_concept_id').isin([702677, 702678, 724907, 37003432, 37003435, 37003436]), 'pfizer'
+        ).when(
+            F.col('drug_concept_id').isin([724906, 37003518]), 'moderna'
+        ).when(
+            F.col('drug_concept_id').isin([702866, 739906]), 'janssen'
+        ).when(
+            F.col('drug_concept_id').isin([724905]), 'astrazeneca'
+        ).otherwise(
+            F.lit(None)
+        )
+    )
+
+    return baseline_vaccines
+
+# ri.vector.main.execute.41c51a4c-2331-41c3-acad-6b3c1be58064
+def baseline_vaccines_from_proc_testing(procedure_occurrence):
+    """
+SELECT DISTINCT person_id,
+po.data_partner_id,
+procedure_date,
+
+case when procedure_concept_id = 766238 then 'pfizer'
+    when procedure_concept_id = 766239 then 'moderna'
+    when procedure_concept_id = 766241 then 'janssen'
+    else null
+    end as vax_type
+
+FROM procedure_occurrence po
+INNER JOIN manifest_safe_harbor m ON m.data_partner_id = po.data_partner_id
+where procedure_concept_id IN (766238, 766239, 766241) and po.data_partner_id = 406
+    -- Very conservative filters to allow for date shifting
+    and procedure_date > '2018-12-20'
+    and procedure_date < (m.run_date + 356*2)
+    and procedure_date is not null"""
+    # Create minimal long dataset of vaccine transactions to transpose
+    baseline_vaccines_from_proc = procedure_occurrence.filter(
+        F.col('procedure_concept_id').isin([766238, 766239, 766241])
+    ).filter(
+        F.col('procedure_date').isNotNull()
+    ).filter(
+        F.col('procedure_date') > '2018-12-20'
+    ).withColumn(
+        'vax_type', F.when(
+            F.col('procedure_concept_id') == 766238, 'pfizer'
+        ).when(
+            F.col('procedure_concept_id') == 766239, 'moderna'
+        ).when(
+            F.col('procedure_concept_id') == 766241, 'janssen'
+        ).otherwise(
+            F.lit(None)
+        )
+    ).select(
+        'person_id', 'procedure_date', 'vax_type'
+    )
+
+    return baseline_vaccines_from_proc
+
+# ri.vector.main.execute.c2687a32-aea0-4394-ae9d-b488d148563e
+def sql_pivot_vax_person(deduplicated):
+    """
+select * from (
+    select person_id, data_partner_id,
+    row_number() over (partition by person_id order by person_id, vax_date) as number, vax_type, vax_date
+    from deduplicated
+) A
+
+pivot (
+    max(vax_date) as vax_date, max(vax_type) as vax_type
+    for number in (1,2,3,4)
+)"""
+    # Pivot the long dataset to wide
+    pivot_vax_person = deduplicated.select(
+        'person_id', 'vax_date', 'vax_type'
+    ).withColumn(
+        'number', F.row_number().over(
+            Window.partitionBy('person_id').orderBy('person_id', 'vax_date')
+        )
+    ).groupBy(
+        'person_id'
+    ).pivot(
+        'number', [1, 2, 3, 4]
+    ).agg(
+        F.max('vax_date').alias('vax_date'), F.max('vax_type').alias('vax_type')
+    )
+
+    return pivot_vax_person
 
 def get_time_series_data(data_tables: dict, concept_tables:dict):
     person_table = data_tables["person"]
@@ -1342,10 +1696,22 @@ def get_time_series_data(data_tables: dict, concept_tables:dict):
     custom_concept_set_members_table = custom_concept_set_members(concept_set_members_table)
     everyone_cohort_de_id_table = everyone_cohort_de_id(person_table, micro_to_macro_table, custom_concept_set_members_table)
 
+    baseline_vaccines_from_proc_testing_table = baseline_vaccines_from_proc_testing(procedure_occurrence_table)
+    baseline_vaccines_table = baseline_vaccines(custom_concept_set_members_table, drug_exposure_table)
+    distinct_vax_person_table = distinct_vax_person(baseline_vaccines_table, baseline_vaccines_from_proc_testing_table)
+    deduplicated_table = deduplicated(distinct_vax_person_table)
+    aggregate_person_table = aggregate_person(deduplicated_table)
+    sql_pivot_vax_person_table = sql_pivot_vax_person(deduplicated_table)
+    Vaccine_fact_de_identified_table = Vaccine_fact_de_identified(aggregate_person_table, sql_pivot_vax_person_table)
+    everyone_conditions_of_interest_table = everyone_conditions_of_interest(everyone_cohort_de_id_table, condition_occurrence_table, customized_concept_set_input_table, custom_concept_set_members_table)
+    first_covid_positive_table = first_covid_positive(everyone_conditions_of_interest_table)
+
     everyone_conditions_of_interest_table = everyone_conditions_of_interest(everyone_cohort_de_id_table, condition_occurrence_table, customized_concept_set_input_table, custom_concept_set_members_table)
     everyone_observations_of_interest_table = everyone_observations_of_interest(observation_table,everyone_cohort_de_id_table, customized_concept_set_input_table, custom_concept_set_members_table)
     everyone_procedures_of_interest_table = everyone_procedures_of_interest(everyone_cohort_de_id_table, procedure_occurrence_table, customized_concept_set_input_table, custom_concept_set_members_table)
     everyone_drugs_of_interest_table = everyone_drugs_of_interest(drug_exposure_table, everyone_cohort_de_id_table, customized_concept_set_input_table, custom_concept_set_members_table)
     everyone_measurements_of_interest_table = everyone_measurements_of_interest(measurement_table, everyone_cohort_de_id_table, custom_concept_set_members_table)
-    all_patients_visit_day_facts_table_de_id_table = all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest_table, everyone_measurements_of_interest_table, everyone_procedures_of_interest_table, everyone_observations_of_interest_table, everyone_drugs_of_interest_table, micro_to_macro_table, None, None)
+    everyone_vaccines_of_interest_table = everyone_vaccines_of_interest(everyone_cohort_de_id_table, Vaccine_fact_de_identified_table, first_covid_positive_table)
+
+    all_patients_visit_day_facts_table_de_id_table = all_patients_visit_day_facts_table_de_id(everyone_conditions_of_interest_table, everyone_measurements_of_interest_table, everyone_procedures_of_interest_table, everyone_observations_of_interest_table, everyone_drugs_of_interest_table, micro_to_macro_table, everyone_vaccines_of_interest_table, None)
     return all_patients_visit_day_facts_table_de_id_table
