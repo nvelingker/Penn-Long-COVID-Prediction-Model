@@ -1,4 +1,4 @@
-from data_preparation import *
+from data_preparation_2 import *
 from src.featurize import *
 from src.sklearn_models import *
 from src.mTan import train_sequential_model_3
@@ -116,27 +116,75 @@ def num_recent_visits(recent_visits_2):
 
     return df
 
+def recent_visits_w_nlp_notes_2(recent_visits_2, person_nlp_symptom):
+    person_nlp_symptom = person_nlp_symptom
+    person_nlp_symptom = person_nlp_symptom.join(recent_visits_2.select(["person_id", "six_month_before_last_visit"]).distinct(), on="person_id", how="left")
+    person_nlp_symptom = person_nlp_symptom.where(person_nlp_symptom["note_date"] >= person_nlp_symptom["six_month_before_last_visit"])
+    person_nlp_symptom = person_nlp_symptom.withColumnRenamed("note_date", "visit_date").drop(*["six_month_before_last_visit", "note_id", "visit_occurrence_id"])
+    person_nlp_symptom = person_nlp_symptom.withColumn("has_nlp_note", lit(1.0))
+    df = recent_visits_2.join(person_nlp_symptom, on = ["person_id", "visit_date"], how="left").orderBy(*["person_id", "visit_date"])#.fillna(0.0)
+
+
+    # person_nlp_symptom = person_nlp_symptom.merge(recent_visits_2[["person_id", "six_month_before_last_visit"]].drop_duplicates(), on="person_id", how="left")
+    # person_nlp_symptom = person_nlp_symptom.loc[person_nlp_symptom["note_date"] >= person_nlp_symptom["six_month_before_last_visit"]]
+    # person_nlp_symptom = person_nlp_symptom.rename(columns={"note_date": "visit_date"}).drop(columns=["six_month_before_last_visit", "note_id", "visit_occurrence_id"])
+    # person_nlp_symptom["has_nlp_note"] = 1.0
+
+    # # Make sure type checks
+    # df = recent_visits_2.merge(person_nlp_symptom, on=["person_id", "visit_date"], how="left").sort_values(["person_id", "visit_date"])#.fillna(0.0)
+
+    return df
+
+def person_information(everyone_cohort_de_id):
+    df = everyone_cohort_de_id
+
+    df_pandas = df.toPandas()
+    # First add normalized age
+    min_age = df_pandas["age"].min()
+    max_age = df_pandas["age"].max()
+    diff = max_age - min_age
+    # df["normalized_age"] = df["age"].map(lambda a: (a - min_age) / diff).fillna(0.0)
+    df = df.withColumn("normalized_age", (df["age"] - F.lit(float(min_age))) / F.lit(float(diff))).fillna(0.0)
+
+    # Then add gender information
+    # df["is_male"] = df["gender_concept_name"].map(lambda g: 1 if g == "MALE" else 0)
+    # df = df.withColumn("is_male", F.when(F.col("gender_concept_name") == "MALE", 1).otherwise(0))
+    # # df["is_female"] = df["gender_concept_name"].map(lambda g: 1 if g == "FEMALE" else 0)
+    # df = df.withColumn("is_female", F.when(F.col("gender_concept_name") == "FEMALE", 1).otherwise(0))
+    # # df["is_other_gender"] = df["gender_concept_name"].map(lambda g: 1 if g != "FEMALE" and g != "MALE" else 0)
+    # df = df.withColumn("is_other_gender", F.when(F.col("gender_concept_name") != "FEMALE" & F.col("gender_concept_name") != "MALE", F.lit(1)).otherwise(F.lit(0)))
+
+    # Only include necessary feature
+    # df = df[["person_id", "age", "normalized_age", "is_male", "is_female", "is_other_gender"]]
+    df = df.select("person_id", "age", "normalized_age")#, "is_male", "is_female", "is_other_gender")
+
+    # Return
+    return df
+
 if __name__ == "__main__":
     data_tables = get_training_data()
     concept_tables = get_concept_data()
     print("Beginning training data featurization...")
     everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table = get_time_series_data(data_tables, concept_tables)
-    static_data_table = get_static_from_time_series(everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table)
-    top_k_data_table = get_top_k_data(everyone_cohort_de_id_table, data_tables)
-    print("Finished training data featurization!")
-    print("Beginning top-k training...")
-    train_top_k_models(top_k_data_table, data_tables["long_covid_silver_standard"])
-    print("Finished topk training!")
-    print("Beginning static training...")
-    train_static_models(static_data_table, data_tables["long_covid_silver_standard"])
-    print("Finished static training!")
+
+    person_information_table = person_information(everyone_cohort_de_id_table)
+    # static_data_table = get_static_from_time_series(everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table)
+    # top_k_data_table = get_top_k_data(everyone_cohort_de_id_table, data_tables)
+    # print("Finished training data featurization!")
+    # print("Beginning top-k training...")
+    # train_top_k_models(top_k_data_table, data_tables["long_covid_silver_standard"])
+    # print("Finished topk training!")
+    # print("Beginning static training...")
+    # train_static_models(static_data_table, data_tables["long_covid_silver_standard"])
+    # print("Finished static training!")
 
     recent_visits_2_data = recent_visits_2(all_patients_visit_day_facts_table_de_id_table)
 
     num_recent_visits_data = num_recent_visits(recent_visits_2_data)
 
-    train_valid_split_data = train_valid_split( data_tables["long_covid_silver_standard"], num_recent_visits_data)
+    train_valid_split_data = train_valid_split(data_tables["long_covid_silver_standard"], num_recent_visits_data)
 
-    
 
-    train_sequential_model_3(train_valid_split_data, data_tables["long_covid_silver_standard"], data_tables["person_info"], recent_visits_w_nlp_notes_2)
+    # recent_visits_w_nlp_notes_2_data = recent_visits_w_nlp_notes_2(recent_visits_2_data, person_nlp_symptom)
+
+    train_sequential_model_3(train_valid_split_data, data_tables["long_covid_silver_standard"], person_information_table, recent_visits_2_data)

@@ -292,10 +292,10 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
         if all_person_info is not None:
             person_info = all_person_info.loc[person_id]
             person_info_tensor = torch.tensor([
-                person_info["normalized_age"], 
-                person_info["is_male"], 
-                person_info["is_female"], 
-                person_info["is_other_gender"]
+                person_info["normalized_age"]
+                # person_info["is_male"], 
+                # person_info["is_female"], 
+                # person_info["is_other_gender"]
             ])
         visits = recent_visit.loc[person_id]
         visit_tensors = []
