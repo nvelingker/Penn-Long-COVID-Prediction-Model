@@ -161,10 +161,18 @@ def person_information(everyone_cohort_de_id):
     # Return
     return df
 
-if __name__ == "__main__":
+def select_subset_data(data_tables):
+    new_data_tables = dict()
+    for key in data_tables:
+        new_data_tables[key] = data_tables[key].sort("person_id").limit(5000)
+        
+    return new_data_tables
+
+def train_main():
     data_tables = get_training_data()
     concept_tables = get_concept_data()
     print("Beginning training data featurization...")
+    data_tables = select_subset_data(data_tables)
     everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table = get_time_series_data(data_tables, concept_tables)
 
     person_information_table = person_information(everyone_cohort_de_id_table)
@@ -184,7 +192,18 @@ if __name__ == "__main__":
 
     train_valid_split_data = train_valid_split(data_tables["long_covid_silver_standard"], num_recent_visits_data)
 
-
     # recent_visits_w_nlp_notes_2_data = recent_visits_w_nlp_notes_2(recent_visits_2_data, person_nlp_symptom)
 
-    train_sequential_model_3(train_valid_split_data, data_tables["long_covid_silver_standard"], person_information_table, recent_visits_2_data)
+    rec, dec, classifier = train_sequential_model_3(train_valid_split_data, data_tables["long_covid_silver_standard"], person_information_table, recent_visits_2_data)
+
+def test_main():
+    data_tables = get_testing_data()
+    concept_tables = get_concept_data()
+    print("Beginning training data featurization...")
+    everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table = get_time_series_data(data_tables, concept_tables)    
+    
+    
+    
+
+if __name__ == "__main__":
+    train_main()

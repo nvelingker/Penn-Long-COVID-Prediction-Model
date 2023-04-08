@@ -320,9 +320,9 @@ def train_mTans(lr, norm, std, alpha, k_iwae, dim, latent_dim, rec, dec, classif
                 optimizer_state_dict = optimizer.state_dict()
                 best_true, best_pred_labels = true.copy(), pred_labels.copy()
                 best_train_true, best_train_pred_labels = train_true.copy(), train_pred_labels.copy()
-                write_to_pickle(rec_state_dict, "mTans_rec")
-                write_to_pickle(dec_state_dict, "mTans_dec")
-                write_to_pickle(classifier_state_dict, "mTans_classifier")
+                # write_to_pickle(rec_state_dict, "mTans_rec")
+                # write_to_pickle(dec_state_dict, "mTans_dec")
+                # write_to_pickle(classifier_state_dict, "mTans_classifier")
 
     return best_true, best_pred_labels, best_train_true, best_train_pred_labels, rec_state_dict, dec_state_dict, classifier_state_dict
 
@@ -624,12 +624,15 @@ def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, pers
 
     best_valid_true, best_valid_pred_labels, best_train_true, best_train_pred_labels, rec_state_dict, dec_state_dict, classifier_state_dict = train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
     device = torch.device('cpu')
-    write_to_pickle(rec_state_dict, "mTans_rec")
-    write_to_pickle(dec_state_dict, "mTans_dec")
-    write_to_pickle(classifier_state_dict, "mTans_classifier")
+    rec.load_state_dict(rec_state_dict)
+    dec.load_state_dict(dec_state_dict)
+    classifier.load_state_dict(classifier_state_dict)
+    # write_to_pickle(rec_state_dict, "mTans_rec")
+    # write_to_pickle(dec_state_dict, "mTans_dec")
+    # write_to_pickle(classifier_state_dict, "mTans_classifier")
     # read_from_pickle()
     print("save models successfully")
-    
+    return rec, dec, classifier
 
 # def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
 # def train_sequential_model_0():
