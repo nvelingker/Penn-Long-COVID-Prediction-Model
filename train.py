@@ -41,7 +41,7 @@ def train_main():
     data_tables = get_training_data()
     concept_tables = get_concept_data()
     print("Beginning training data featurization...")
-    data_tables = select_subset_data(data_tables)
+    # data_tables = select_subset_data(data_tables)
     everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table = get_time_series_data(data_tables, concept_tables)
 
     person_information_table = person_information(everyone_cohort_de_id_table)

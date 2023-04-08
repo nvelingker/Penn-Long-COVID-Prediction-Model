@@ -375,7 +375,7 @@ def pandas_to_spark(df):
 def select_subset_data(data_tables):
     new_data_tables = dict()
     for key in data_tables:
-        new_data_tables[key] = data_tables[key].sort("person_id").limit(1000)
+        new_data_tables[key] = data_tables[key].sort("person_id").limit(10000)
         
     return new_data_tables
 
