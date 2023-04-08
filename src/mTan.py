@@ -600,6 +600,10 @@ def test_mTan(all_test_ids, person_information, recent_visits_w_nlp_notes_2):
     # test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, _ = pre_processing_visits(valid_person_ids.toPandas(), person_information.toPandas(), recent_visits_w_nlp_notes_2.toPandas(), None, setup="both")
     # test_person_ids, test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, _, data_min, data_max = read_from_pickle(produce_dataset_testing, "test_data.pickle")
 
+    non_empty_column_ids = torch.load(os.path.join(root_dir, "model_checkpoints/non_empty_column_ids"))
+
+    test_visit_tensor_ls, test_mask_ls = remove_empty_columns_with_non_empty_cls(test_visit_tensor_ls, test_mask_ls, non_empty_column_ids)
+
     test_dataset = LongCOVIDVisitsDataset2(test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, None, data_min, data_max)
 
     static_input_dim = test_dataset.__getitem__(1)[3].shape[-1]
@@ -763,9 +767,10 @@ def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, pers
     
     torch.save(rec_state_dict, os.path.join(root_dir, "model_checkpoints/rec_state_dict"))
     torch.save(dec_state_dict, os.path.join(root_dir, "model_checkpoints/dec_state_dict"))
-    torch.save(classifier, os.path.join(root_dir, "model_checkpoints/classifier"))
+    torch.save(classifier_state_dict, os.path.join(root_dir, "model_checkpoints/classifier"))
     torch.save(data_min, os.path.join(root_dir, "model_checkpoints/data_min"))
     torch.save(data_max, os.path.join(root_dir, "model_checkpoints/data_max"))
+    torch.save(non_empty_column_ids, os.path.join(root_dir, "model_checkpoints/non_empty_column_ids"))
     
     # rec.load_state_dict(rec_state_dict)
     # dec.load_state_dict(dec_state_dict)

@@ -6,6 +6,10 @@ from pyspark.sql import SparkSession
 import pyspark.sql.functions as F
 from pyspark.sql.functions import col, max as max_, min as min_
 from pyspark.sql.functions import datediff
+import os
+
+
+selected_cols = ['1_vax_dose', 'HOSPITALIZED', 'Diastolic_blood_pressure', 'blood_Chloride', 'DEMENTIA', 'SOLIDORGANORBLOODSTEMCELLTRANSPLANT', 'DIABETESCOMPLICATED', 'THALASSEMIA', 'blood_Platelets', 'VAX_DAYS_SINCE_FCP', 'HYDROCORTISONE', 'temperature', 'RESPIRATORY', 'blood_UreaNitrogen', 'HYPERTENSION', '1_VAX_PFIZER', 'DIABETESUNCOMPLICATED', 'SUBSTANCEABUSE', 'LANCET', 'respiratory_rate', 'PCR_AG_Pos', 'DEPRESSION', 'INSOMNIA', 'BLOODPRESSURE', 'TRIAMCINOLONE', 'blood_Potassium', 'RHEUMATOLOGICDISEASE', 'MCV', 'heart_rate', 'CHRONICLUNGDISEASE', 'PREGNANCY', 'DATE_DIFF_1_2', 'Oxygen_saturation', 'Systolic_blood_pressure', 'blood_Albumin', 'vax_before_FCP', 'LUNGDISORDER', 'Antibody_Neg', '1_VAX_MODERNA', 'MODERATESEVERELIVERDISEASE', 'CONGESTIVEHEARTFAILURE', 'blood_Glucose', 'MENTAL', 'PEPTICULCER', 'blood_Procalcitonin', 'CEREBROVASCULARDISEASE', 'blood_Bilirubin', 'had_vaccine_administered', 'blood_Troponin', 'DYSPNEA', '4_vax_dose', 'HEMIPLEGIAORPARAPLEGIA', 'MILDLIVERDISEASE', 'blood_Creatinine', 'BMI_rounded', 'blood_Hematocrit', '1_VAX_JJ', 'MYOCARDIALINFARCTION', 'CORONARYARTERYDISEASE', 'PERIPHERALVASCULARDISEASE', 'blood_Leukocytes', 'Erythrocytes', 'ANTIBIOTICS', 'KIDNEYDISEASE', 'ANXIETY', 'HEARTFAILURE', '2_vax_dose', 'PREDNISONE', 'CLONEAZEPAM', 'blood_Calcium', 'MALIGNANTCANCER', 'SYSTEMICCORTICOSTEROIDS', 'HEPARIN', 'blood_hemoglobin', 'VENOUSIMPLANT', 'METASTATICSOLIDTUMORCANCERS', 'blood_sodium', '3_vax_dose', 'STEROIDS', 'PCR_AG_Neg', 'MCHC', 'Antibody_Pos', 'PSYCHOSIS', 'OTHERIMMUNOCOMPROMISED']
 
 def remove_empty_columns_with_non_empty_cls(values, masks, non_empty_column_ids):
 
@@ -261,6 +265,7 @@ def read_from_pickle(transform_input, filename):
     return data
 
 def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setup="both", start_col_id = 5, end_col_id=-1, label_col_name = None, return_person_ids = False):
+    root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     if label is not None and "person_id" in label.columns:
         label = label.set_index("person_id")
     if type(person_ids) is list:
@@ -292,6 +297,12 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
     person_count=0
     print(len(recent_visit.columns))
     print(recent_visit.columns)
+    
+    # if selected_cols is None:
+    #     selected_cols = list(recent_visit.columns[start_col_id:end_col_id])
+    
+    # torch.save(selected_cols, os.path.join(root_dir, "selected_cols"))
+    
     for person_id in all_person_ids:
         if all_person_info is not None:
             person_info = all_person_info.loc[person_id]
@@ -305,12 +316,13 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
         visit_tensors = []
         time_steps = []
         
-        visits_tensor2 = torch.from_numpy(np.array(visits.iloc[:,start_col_id:end_col_id].values.tolist()))
-        time_steps2 = torch.from_numpy(np.array(visits["diff_days"].values.tolist()))
+        # visits_tensor2 = torch.from_numpy(np.array(visits.iloc[:,start_col_id:end_col_id].values.tolist()))
+        # time_steps2 = torch.from_numpy(np.array(visits["diff_days"].values.tolist()))
+        
         for i in range(len(visits)):
             visit = visits.iloc[i]
             # visit_tensor = torch.tensor([visit["diff_date"] / 180] + list(visit[5:]))
-            visit_tensor = list(visit[start_col_id:end_col_id])
+            visit_tensor = list(visit[selected_cols])# list(visit[start_col_id:end_col_id])
             time_steps.append(visit["diff_days"])
             visit_tensors.append(torch.tensor(visit_tensor))
         visits_tensor = torch.stack(visit_tensors)
@@ -344,6 +356,8 @@ def pre_processing_visits(person_ids, all_person_info, recent_visit, label, setu
         person_count +=1
         if person_count %100 == 0:
             print("person count::", person_count)
+            
+    
     if return_person_ids:
         return visit_tensor_ls, mask_ls, time_step_ls, person_info_ls, label_tensor_ls, all_person_ids
     else:
@@ -361,7 +375,7 @@ def pandas_to_spark(df):
 def select_subset_data(data_tables):
     new_data_tables = dict()
     for key in data_tables:
-        new_data_tables[key] = data_tables[key].sort("person_id").limit(5000)
+        new_data_tables[key] = data_tables[key].sort("person_id").limit(1000)
         
     return new_data_tables
 

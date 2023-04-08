@@ -6,7 +6,7 @@ from src.sklearn_models import *
 if __name__ == "__main__":
     data_tables = get_testing_data()
     concept_tables = get_concept_data()
-    data_tables = select_subset_data(data_tables)
+    # data_tables = select_subset_data(data_tables)
     print("Beginning testing data featurization...")
     everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table = get_time_series_data(data_tables, concept_tables)
     static_data_table = get_static_from_time_series(everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table)
