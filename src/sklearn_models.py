@@ -12,7 +12,10 @@ import pyspark.sql.functions as F
 
 from joblib import dump, load
 
-import os
+import os, sys
+sys.path.append(os.path.dirname(os.path.realpath(__file__)))
+from utils import *
+from mTan import test_mTan
 
 def train_top_k_models(top_k_concepts_data, Long_COVID_Silver_Standard, show_stats = False):
     ## get outcome column
@@ -186,7 +189,16 @@ def train_static_models(all_patients_summary_fact_table_de_id, Long_COVID_Silver
         print("combined least important features:", [cols[1:][int(i)] for i in rfc_sort_features_least if i in lrc_sort_features_least])
         print("column variance: \n", all_patients_summary_fact_table_de_id.var().to_string())
 
-def sklearn_models_predict(top_k_data, static_data):
+
+def model_predict_mTan(all_test_ids, everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table):
+    recent_visits_2_data = recent_visits_2(all_patients_visit_day_facts_table_de_id_table)
+    
+    person_information_table = person_information(everyone_cohort_de_id_table)
+    # train_valid_split_data = train_valid_split(data_tables["long_covid_silver_standard"], num_recent_visits_data)
+    return test_mTan(all_test_ids, person_information_table, recent_visits_2_data)
+
+
+def sklearn_models_predict(top_k_data, static_data, data_tables, everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table):
     root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     top_k_cols = load(os.path.join(root_dir, "model_checkpoints/topk_metadata"))
     static_cols = load(os.path.join(root_dir, "model_checkpoints/static_metadata"))
@@ -220,7 +232,10 @@ def sklearn_models_predict(top_k_data, static_data):
         data = top_k_data if model_name[-1] == 'k' else static_data
         model_pred = model.predict_proba(data)[:, 1]
         model_preds[model_name] = model_pred
-
+        
+    model_pred = model_predict_mTan(person_id, everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table)
+    model_preds["mTan"] = model_pred
+    
     predictions = pd.DataFrame.from_dict(model_preds)
     predictions["outcome_proba"] = predictions[[c for c in predictions.columns if c != "person_id"]].mean(axis=1)
     predictions["outcome"] = predictions.apply(lambda r: 1 if r["outcome_proba"] > 0.5 else 0, axis=1)

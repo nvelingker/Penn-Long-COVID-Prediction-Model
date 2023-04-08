@@ -517,6 +517,140 @@ def convert_type(df, all_types):
     return df
 
 
+def test_classifier(model, test_loader, dec=None, latent_dim=None, classify_pertp=True, classifier=None,dim=41, device='cuda', reconst=False, num_sample=1):
+    pred = []
+    true = []
+    test_loss = 0
+    for item in test_loader:
+        test_batch, label, person_info_batch = item
+        # train_batch, label, person_info_batch = item
+        if person_info_batch is not None:
+            test_batch, person_info_batch = test_batch.float().to(device), person_info_batch.float().to(device)
+        else:
+            test_batch = test_batch.float().to(device)
+        batch_len = test_batch.shape[0]
+        observed_data, observed_mask, observed_tp \
+            = test_batch[:, :, :dim], test_batch[:, :, dim:2*dim], test_batch[:, :, -1]
+        # observed_data = observed_data.float()
+        # observed_mask = observed_mask.float()
+        # observed_tp = observed_tp.float()
+        with torch.no_grad():
+            out = model(
+                torch.cat((observed_data, observed_mask), 2), observed_tp)
+            if reconst:
+                qz0_mean, qz0_logvar = out[:, :,
+                                           :latent_dim], out[:, :, latent_dim:]
+                epsilon = torch.randn(
+                    num_sample, qz0_mean.shape[0], qz0_mean.shape[1], qz0_mean.shape[2]).to(device)
+                z0 = epsilon * torch.exp(.5 * qz0_logvar) + qz0_mean
+                z0 = z0.view(-1, qz0_mean.shape[1], qz0_mean.shape[2])
+                if classify_pertp:
+                    pred_x = dec(z0, observed_tp[None, :, :].repeat(
+                        num_sample, 1, 1).view(-1, observed_tp.shape[1]))
+                    #pred_x = pred_x.view(num_sample, batch_len, pred_x.shape[1], pred_x.shape[2])
+                    out = classifier(pred_x, person_info_batch)
+                else:
+                    out = classifier(z0, person_info_batch)
+            # if classify_pertp:
+            #     N = label.size(-1)
+            #     out = out.view(-1, N)
+            #     label = label.view(-1, N)
+            #     _, label = label.max(-1)
+            #     test_loss += nn.CrossEntropyLoss()(out, label.long()).item() * batch_len * 50.
+            # else:
+            #     label = label.unsqueeze(0).repeat_interleave(
+            #         num_sample, 0).view(-1)
+            #     test_loss += nn.CrossEntropyLoss()(out, label.long()).item() * batch_len * num_sample
+        pred.append(out.cpu())
+        # true.append(label.cpu())
+    pred = torch.cat(pred, 0)
+    pred_scores = torch.sigmoid(pred[:, 1])
+    pred_scores = pred_scores.numpy()
+    pred_labels = (pred_scores > 0.5).reshape(-1).astype(int)
+    return pred_labels, pred_scores
+
+    # 
+    # true = torch.cat(true, 0)
+    
+
+    # pred = pred.numpy()
+    # true = true.numpy()
+    
+    # print("True labels::", true.reshape(-1))
+    # print("Predicated labels::", pred_scores.reshape(-1))
+    # acc = np.mean(pred.argmax(1) == true)
+    # auc = roc_auc_score(
+    #     true, pred_scores) if not classify_pertp else 0.
+    # true = true.reshape(-1)
+    
+    # recall = recall_score(true.astype(int), pred_labels)
+    # precision = precision_score(true.astype(int), pred_labels)
+    # print("validation classification Report:\n{}".format(classification_report(true.astype(int), pred_labels)))
+    # return test_loss/pred.shape[0], acc, auc, recall, precision, true, pred_labels
+
+
+def test_mTan(all_test_ids, person_information, recent_visits_w_nlp_notes_2):
+    root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    
+    data_min = torch.load(os.path.join(root_dir, "model_checkpoints/data_min"))
+    data_max = torch.load(os.path.join(root_dir, "model_checkpoints/data_max"))
+    
+    
+    test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, test_label_tensor_ls, test_person_ids = pre_processing_visits(None, person_information.toPandas(), recent_visits_w_nlp_notes_2.toPandas(), None, setup="both", return_person_ids = True, start_col_id=4)
+    # test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, _ = pre_processing_visits(valid_person_ids.toPandas(), person_information.toPandas(), recent_visits_w_nlp_notes_2.toPandas(), None, setup="both")
+    # test_person_ids, test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, _, data_min, data_max = read_from_pickle(produce_dataset_testing, "test_data.pickle")
+
+    test_dataset = LongCOVIDVisitsDataset2(test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, None, data_min, data_max)
+
+    static_input_dim = test_dataset.__getitem__(1)[3].shape[-1]
+
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=4, shuffle=False, collate_fn=LongCOVIDVisitsDataset2.collate_fn)
+    dim = test_dataset.__getitem__(1)[0].shape[-1]
+    latent_dim=20
+    rec_hidden=32
+    learn_emb=True
+    enc_num_heads=1
+    num_ref_points=128
+    gen_hidden=30
+    dec_num_heads=1
+    classifier = create_classifier(latent_dim, 20, has_static=True, static_input_dim=static_input_dim)
+    device = torch.device(
+        'cuda' if torch.cuda.is_available() else 'cpu')
+    print("device::", device)
+    rec = enc_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, rec_hidden, embed_time=32, learn_emb=learn_emb, num_heads=enc_num_heads, device=device)
+    dec = dec_mtan_rnn(dim, torch.linspace(0, 1., num_ref_points), latent_dim, gen_hidden, embed_time=32, learn_emb=learn_emb, num_heads=dec_num_heads, device=device)
+    lr = 0.001
+
+    
+
+    rec = rec.to(device)
+    dec = dec.to(device)
+    classifier = classifier.to(device)
+
+
+    rec.load_state_dict(torch.load(os.path.join(root_dir, "model_checkpoints/rec_state_dict")))
+    dec.load_state_dict(torch.load(os.path.join(root_dir, "model_checkpoints/dec_state_dict")))
+    classifier.load_state_dict(torch.load(os.path.join(root_dir, "model_checkpoints/classifier")))
+
+    
+    test_pred_labels, pred_scores =  test_classifier(rec, test_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
+
+    test_predictions = pd.DataFrame.from_dict({
+            'person_id': test_person_ids,
+            'mTans_outcome': pred_scores.reshape(-1).tolist()
+        }, orient='columns')
+
+    final_test_pred_scores  = []
+
+    for pid in all_test_ids:
+        if pid in test_person_ids:
+            sub_id = test_person_ids.index(pid)
+            final_test_pred_scores.append(pred_scores[sub_id])
+        else:
+            final_test_pred_scores.append(0.5)
+
+    return final_test_pred_scores
+
 def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
     print("start")
     # dim=10
@@ -630,7 +764,8 @@ def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, pers
     torch.save(rec_state_dict, os.path.join(root_dir, "model_checkpoints/rec_state_dict"))
     torch.save(dec_state_dict, os.path.join(root_dir, "model_checkpoints/dec_state_dict"))
     torch.save(classifier, os.path.join(root_dir, "model_checkpoints/classifier"))
-    
+    torch.save(data_min, os.path.join(root_dir, "model_checkpoints/data_min"))
+    torch.save(data_max, os.path.join(root_dir, "model_checkpoints/data_max"))
     
     # rec.load_state_dict(rec_state_dict)
     # dec.load_state_dict(dec_state_dict)
@@ -765,3 +900,4 @@ def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, pers
 
 # if __name__ == "__main__":
 #     train_sequential_model_3()
+
