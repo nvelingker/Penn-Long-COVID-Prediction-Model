@@ -176,15 +176,15 @@ def train_main():
     everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table = get_time_series_data(data_tables, concept_tables)
 
     person_information_table = person_information(everyone_cohort_de_id_table)
-    # static_data_table = get_static_from_time_series(everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table)
-    # top_k_data_table = get_top_k_data(everyone_cohort_de_id_table, data_tables)
-    # print("Finished training data featurization!")
-    # print("Beginning top-k training...")
-    # train_top_k_models(top_k_data_table, data_tables["long_covid_silver_standard"])
-    # print("Finished topk training!")
-    # print("Beginning static training...")
-    # train_static_models(static_data_table, data_tables["long_covid_silver_standard"])
-    # print("Finished static training!")
+    static_data_table = get_static_from_time_series(everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table)
+    top_k_data_table = get_top_k_data(everyone_cohort_de_id_table, data_tables)
+    print("Finished training data featurization!")
+    print("Beginning top-k training...")
+    train_top_k_models(top_k_data_table, data_tables["long_covid_silver_standard"])
+    print("Finished topk training!")
+    print("Beginning static training...")
+    train_static_models(static_data_table, data_tables["long_covid_silver_standard"])
+    print("Finished static training!")
 
     recent_visits_2_data = recent_visits_2(all_patients_visit_day_facts_table_de_id_table)
 
@@ -194,8 +194,10 @@ def train_main():
 
     # recent_visits_w_nlp_notes_2_data = recent_visits_w_nlp_notes_2(recent_visits_2_data, person_nlp_symptom)
 
-    rec, dec, classifier = train_sequential_model_3(train_valid_split_data, data_tables["long_covid_silver_standard"], person_information_table, recent_visits_2_data)
+    train_sequential_model_3(train_valid_split_data, data_tables["long_covid_silver_standard"], person_information_table, recent_visits_2_data)
 
+    
+    
 def test_main():
     data_tables = get_testing_data()
     concept_tables = get_concept_data()
