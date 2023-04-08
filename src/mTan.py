@@ -225,7 +225,7 @@ def train_mTans(lr, norm, std, alpha, k_iwae, dim, latent_dim, rec, dec, classif
     if val_loader is not None:
         val_loss, val_acc, val_auc, val_recall, val_precision,_,_ =  evaluate_classifier(rec, val_loader,latent_dim=latent_dim, classify_pertp=False, classifier=classifier, reconst=True, num_sample=1, dim=dim, device=device)
     
-        print("validation performance at epoch::", itr)
+        # print("validation performance at epoch::", itr)
         print("validation loss::", val_loss)
         print("validation accuracy::", val_acc)
         print("validation auc score::", val_auc)
@@ -624,15 +624,23 @@ def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, pers
 
     best_valid_true, best_valid_pred_labels, best_train_true, best_train_pred_labels, rec_state_dict, dec_state_dict, classifier_state_dict = train_mTans(lr, True, 0.01, 100, 1, dim, latent_dim, rec, dec, classifier, epochs, train_loader, valid_loader, is_kl=True)
     device = torch.device('cpu')
-    rec.load_state_dict(rec_state_dict)
-    dec.load_state_dict(dec_state_dict)
-    classifier.load_state_dict(classifier_state_dict)
-    # write_to_pickle(rec_state_dict, "mTans_rec")
-    # write_to_pickle(dec_state_dict, "mTans_dec")
-    # write_to_pickle(classifier_state_dict, "mTans_classifier")
-    # read_from_pickle()
-    print("save models successfully")
-    return rec, dec, classifier
+    
+    root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    
+    torch.save(rec_state_dict, os.path.join(root_dir, "model_checkpoints/rec_state_dict"))
+    torch.save(dec_state_dict, os.path.join(root_dir, "model_checkpoints/dec_state_dict"))
+    torch.save(classifier, os.path.join(root_dir, "model_checkpoints/classifier"))
+    
+    
+    # rec.load_state_dict(rec_state_dict)
+    # dec.load_state_dict(dec_state_dict)
+    # classifier.load_state_dict(classifier_state_dict)
+    # # write_to_pickle(rec_state_dict, "mTans_rec")
+    # # write_to_pickle(dec_state_dict, "mTans_dec")
+    # # write_to_pickle(classifier_state_dict, "mTans_classifier")
+    # # read_from_pickle()
+    # print("save models successfully")
+    # return rec, dec, classifier
 
 # def train_sequential_model_3(train_valid_split, Long_COVID_Silver_Standard, person_information, recent_visits_w_nlp_notes_2):
 # def train_sequential_model_0():

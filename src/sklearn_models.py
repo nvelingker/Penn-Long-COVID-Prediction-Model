@@ -12,11 +12,15 @@ import pyspark.sql.functions as F
 
 from joblib import dump, load
 
+import os
+
 def train_top_k_models(top_k_concepts_data, Long_COVID_Silver_Standard, show_stats = False):
     ## get outcome column
     cols = top_k_concepts_data.columns
 
-    dump(cols, "./Penn-Long-COVID-Prediction-Model/model_checkpoints/topk_metadata")
+    root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
+    dump(cols, os.path.join(root_dir, "model_checkpoints/topk_metadata"))
 
     top_k_concepts_data = top_k_concepts_data.toPandas()
     Long_COVID_Silver_Standard = Long_COVID_Silver_Standard.toPandas()
@@ -54,7 +58,7 @@ def train_top_k_models(top_k_concepts_data, Long_COVID_Silver_Standard, show_sta
     nnc = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(20, 10), random_state=1).fit(nn_scaler.transform(X_train), y_train)
 
     for model, name in [(lrc, "lrc_topk"), (lrc2, "lrc_bal_topk"), (rfc, "rfc_topk"), (gbc, "gbc_topk"), (nnc, "nnc_topk")]:
-        dump(model, "./Penn-Long-COVID-Prediction-Model/model_checkpoints/" + name)
+        dump(model, os.path.join(root_dir, "model_checkpoints/" + name))
 
     
     if show_stats:
@@ -108,9 +112,9 @@ def train_static_models(all_patients_summary_fact_table_de_id, Long_COVID_Silver
     Long_COVID_Silver_Standard = Long_COVID_Silver_Standard.toPandas()
 
     static_cols = ['person_id','total_visits', 'age']
-
+    root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     cols = static_cols + [col for col in all_patients_summary_fact_table_de_id.columns if 'indicator' in col]
-    dump(cols, "./Penn-Long-COVID-Prediction-Model/model_checkpoints/static_metadata")
+    dump(cols, os.path.join(root_dir, "model_checkpoints/static_metadata"))
     
     ## get outcome column
     Long_COVID_Silver_Standard["outcome"] = Long_COVID_Silver_Standard.apply(lambda x: max([x["pasc_code_after_four_weeks"], x["pasc_code_prior_four_weeks"]]), axis=1)
@@ -138,7 +142,7 @@ def train_static_models(all_patients_summary_fact_table_de_id, Long_COVID_Silver
     gbc = GradientBoostingClassifier(**gbc_params).fit(X_train, y_train)
 
     for model, name in [(lrc, "lrc_static"), (lrc2, "lrc_bal_static"), (rfc, "rfc_static"), (gbc, "gbc_static")]:
-        dump(model, "./Penn-Long-COVID-Prediction-Model/model_checkpoints/" + name)
+        dump(model, os.path.join(root_dir, "model_checkpoints/") + name)
 
     if show_stats:
 
@@ -183,8 +187,9 @@ def train_static_models(all_patients_summary_fact_table_de_id, Long_COVID_Silver
         print("column variance: \n", all_patients_summary_fact_table_de_id.var().to_string())
 
 def sklearn_models_predict(top_k_data, static_data):
-    top_k_cols = load("./Penn-Long-COVID-Prediction-Model/model_checkpoints/topk_metadata")
-    static_cols = load("./Penn-Long-COVID-Prediction-Model/model_checkpoints/static_metadata")
+    root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    top_k_cols = load(os.path.join(root_dir, "model_checkpoints/topk_metadata"))
+    static_cols = load(os.path.join(root_dir, "model_checkpoints/static_metadata"))
 
     for col in top_k_cols:
         if col not in list(top_k_data.columns):
@@ -211,7 +216,7 @@ def sklearn_models_predict(top_k_data, static_data):
     models = ["gbc_static", "gbc_topk", "lrc_bal_static", "lrc_bal_topk", "lrc_static", "lrc_topk", "rfc_static", "rfc_topk"]
     model_preds = {"person_id": person_id}
     for model_name in models:
-        model = load("./Penn-Long-COVID-Prediction-Model/model_checkpoints/" + model_name)
+        model = load(os.path.join(root_dir, "model_checkpoints/" + model_name))
         data = top_k_data if model_name[-1] == 'k' else static_data
         model_pred = model.predict_proba(data)[:, 1]
         model_preds[model_name] = model_pred
@@ -219,7 +224,7 @@ def sklearn_models_predict(top_k_data, static_data):
     predictions = pd.DataFrame.from_dict(model_preds)
     predictions["outcome_proba"] = predictions[[c for c in predictions.columns if c != "person_id"]].mean(axis=1)
     predictions["outcome"] = predictions.apply(lambda r: 1 if r["outcome_proba"] > 0.5 else 0, axis=1)
-    predictions.to_csv("./Penn-Long-COVID-Prediction-Model/predictions.csv", encoding='utf-8', index=False)
+    predictions.to_csv(os.path.join(root_dir, "predictions.csv"), encoding='utf-8', index=False)
 
     
 
