@@ -198,7 +198,7 @@ def model_predict_mTan(all_test_ids, everyone_cohort_de_id_table, all_patients_v
     return test_mTan(all_test_ids, person_information_table, recent_visits_2_data)
 
 
-def sklearn_models_predict(top_k_data, static_data, data_tables, everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table):
+def sklearn_models_predict(top_k_data, static_data, everyone_cohort_de_id_table, all_patients_visit_day_facts_table_de_id_table):
     root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     top_k_cols = load(os.path.join(root_dir, "model_checkpoints/topk_metadata"))
     static_cols = load(os.path.join(root_dir, "model_checkpoints/static_metadata"))

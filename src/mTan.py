@@ -596,7 +596,7 @@ def test_mTan(all_test_ids, person_information, recent_visits_w_nlp_notes_2):
     data_max = torch.load(os.path.join(root_dir, "model_checkpoints/data_max"))
     
     
-    test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, test_label_tensor_ls, test_person_ids = pre_processing_visits(None, person_information.toPandas(), recent_visits_w_nlp_notes_2.toPandas(), None, setup="both", return_person_ids = True, start_col_id=4)
+    test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, test_label_tensor_ls, test_person_ids = pre_processing_visits(None, person_information.toPandas(), recent_visits_w_nlp_notes_2.toPandas(), None, setup="both", return_person_ids = True)
     # test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, _ = pre_processing_visits(valid_person_ids.toPandas(), person_information.toPandas(), recent_visits_w_nlp_notes_2.toPandas(), None, setup="both")
     # test_person_ids, test_visit_tensor_ls, test_mask_ls, test_time_step_ls, test_person_info_ls, _, data_min, data_max = read_from_pickle(produce_dataset_testing, "test_data.pickle")
 
